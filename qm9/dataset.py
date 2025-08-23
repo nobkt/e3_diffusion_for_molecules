@@ -51,7 +51,7 @@ def retrieve_dataloaders(cfg):
                                                           cfg.device,
                                                           cfg.sequential)
         dataloaders = {}
-        for key, data_list in zip(['train', 'val', 'test'], split_data):
+        for key, data_list in zip(['train', 'valid', 'test'], split_data):
             dataset = build_geom_dataset.GeomDrugsDataset(data_list,
                                                           transform=transform)
             shuffle = (key == 'train') and not cfg.sequential
@@ -81,6 +81,18 @@ def retrieve_dataloaders(cfg):
             max_entries=max_entries
         )
         
+        # Compute n_nodes histogram from the actual data
+        all_data = split_data[0] + split_data[1] + split_data[2]  # train + val + test
+        n_nodes_counts = {}
+        for mol_data in all_data:
+            n_atoms = mol_data.shape[0]
+            n_nodes_counts[n_atoms] = n_nodes_counts.get(n_atoms, 0) + 1
+        
+        # Update dataset_info with computed histogram
+        dataset_info = dataset_info.copy()  # Make a copy to avoid modifying the original
+        dataset_info['n_nodes'] = n_nodes_counts
+        print(f"Computed n_nodes distribution for ASE dataset: {n_nodes_counts}")
+        
         # Create transform
         transform = build_ase_dataset.ASETransform(
             dataset_info,
@@ -91,7 +103,7 @@ def retrieve_dataloaders(cfg):
         
         # Create dataloaders
         dataloaders = {}
-        for key, data_list in zip(['train', 'val', 'test'], split_data):
+        for key, data_list in zip(['train', 'valid', 'test'], split_data):
             dataset = build_ase_dataset.ASEDataset(data_list, transform=transform)
             shuffle = (key == 'train') and not cfg.sequential
 

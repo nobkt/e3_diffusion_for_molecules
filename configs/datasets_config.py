@@ -141,6 +141,8 @@ ase_with_h = {
     'atom_decoder': ['H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl'],
     'atomic_nb': [1, 6, 7, 8, 9, 15, 16, 17],  # Atomic numbers for ASE transform
     'max_n_nodes': 100,  # Adjustable based on typical molecular sizes
+    # Placeholder n_nodes distribution - will be computed dynamically from dataset
+    'n_nodes': {2: 100, 3: 200, 4: 150, 5: 100, 6: 80, 7: 50, 8: 30, 9: 20, 10: 10},
     'colors_dic': ['#FFFFFF99', 'C7', 'C0', 'C3', 'C1', 'C4', 'C8', 'C9'],
     'radius_dic': [0.46, 0.77, 0.77, 0.77, 0.77, 1.0, 1.0, 1.0],
     'with_h': True
@@ -152,6 +154,8 @@ ase_without_h = {
     'atom_decoder': ['C', 'N', 'O', 'F', 'P', 'S', 'Cl'],
     'atomic_nb': [6, 7, 8, 9, 15, 16, 17],  # Atomic numbers for ASE transform  
     'max_n_nodes': 100,  # Adjustable based on typical molecular sizes
+    # Placeholder n_nodes distribution - will be computed dynamically from dataset
+    'n_nodes': {1: 50, 2: 150, 3: 200, 4: 120, 5: 80, 6: 50, 7: 30, 8: 20},
     'colors_dic': ['C7', 'C0', 'C3', 'C1', 'C4', 'C8', 'C9'],
     'radius_dic': [0.77, 0.77, 0.77, 0.77, 1.0, 1.0, 1.0],
     'with_h': False

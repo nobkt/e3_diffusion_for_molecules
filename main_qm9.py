@@ -72,11 +72,20 @@ parser.add_argument('--sin_embedding', type=eval, default=False,
 # <-- EGNN args
 parser.add_argument('--ode_regularization', type=float, default=1e-3)
 parser.add_argument('--dataset', type=str, default='qm9',
-                    help='qm9 | qm9_second_half (train only on the last 50K samples of the training dataset)')
+                    help='qm9 | qm9_second_half | ase (ASE database format) | geom')
 parser.add_argument('--datadir', type=str, default='qm9/temp',
                     help='qm9 directory')
 parser.add_argument('--filter_n_atoms', type=int, default=None,
                     help='When set to an integer value, QM9 will only contain molecules of that amount of atoms')
+parser.add_argument('--filter_molecule_size', type=int, default=None,
+                    help='Filter molecules by number of atoms (for GEOM and ASE datasets)')
+parser.add_argument('--sequential', type=eval, default=False,
+                    help='Sequential processing for memory efficiency (for GEOM and ASE datasets)')
+# ASE dataset specific parameters
+parser.add_argument('--ase_db_file', type=str, default='./data/ase/molecules.db',
+                    help='Path to ASE database file (.db) when using ASE dataset')
+parser.add_argument('--ase_max_entries', type=int, default=None,
+                    help='Maximum number of entries to load from ASE database (None = all)')
 parser.add_argument('--dequantization', type=str, default='argmax_variational',
                     help='uniform | variational | argmax_variational | deterministic')
 parser.add_argument('--n_report_steps', type=int, default=1)
@@ -127,6 +136,7 @@ args.wandb_usr = utils.get_wandb_username(args.wandb_usr)
 
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 device = torch.device("cuda" if args.cuda else "cpu")
+args.device = device  # Add device to args for ASE dataset compatibility
 dtype = torch.float32
 
 if args.resume is not None:

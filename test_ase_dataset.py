@@ -124,7 +124,7 @@ def test_retrieve_dataloaders():
             dataloaders, charge_scale = retrieve_dataloaders(cfg)
             
             assert 'train' in dataloaders
-            assert 'val' in dataloaders  
+            assert 'valid' in dataloaders  
             assert 'test' in dataloaders
             assert charge_scale is None
             
