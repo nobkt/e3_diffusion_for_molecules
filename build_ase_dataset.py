@@ -254,7 +254,7 @@ class ASETransform(object):
         
         # Extract atomic numbers and create one-hot encoding
         atom_types = torch.from_numpy(data[:, 0].astype(int)[:, None])
-        one_hot = atom_types == self.atomic_number_list.long()
+        one_hot = (atom_types == self.atomic_number_list.long()).float()
         new_data['one_hot'] = one_hot
         
         # Handle charges
