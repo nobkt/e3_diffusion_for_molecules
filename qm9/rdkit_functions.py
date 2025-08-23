@@ -180,6 +180,10 @@ def build_xae_molecule(positions, atom_types, dataset_info):
                 order = get_bond_order(atom_decoder[pair[0]], atom_decoder[pair[1]], dists[i, j])
             elif dataset_info['name'] == 'geom':
                 order = geom_predictor((atom_decoder[pair[0]], atom_decoder[pair[1]]), dists[i, j], limit_bonds_to_one=True)
+            else:
+                # For unknown dataset types, default to using get_bond_order method
+                # This prevents UnboundLocalError when dataset name doesn't match expected values
+                order = get_bond_order(atom_decoder[pair[0]], atom_decoder[pair[1]], dists[i, j])
             # TODO: a batched version of get_bond_order to avoid the for loop
             if order > 0:
                 # Warning: the graph should be DIRECTED
