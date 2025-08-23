@@ -134,6 +134,30 @@ geom_no_h = {
     'with_h': False}
 
 
+# ASE dataset configurations
+ase_with_h = {
+    'name': 'ase',
+    'atom_encoder': {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4, 'P': 5, 'S': 6, 'Cl': 7},
+    'atom_decoder': ['H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl'],
+    'atomic_nb': [1, 6, 7, 8, 9, 15, 16, 17],  # Atomic numbers for ASE transform
+    'max_n_nodes': 100,  # Adjustable based on typical molecular sizes
+    'colors_dic': ['#FFFFFF99', 'C7', 'C0', 'C3', 'C1', 'C4', 'C8', 'C9'],
+    'radius_dic': [0.46, 0.77, 0.77, 0.77, 0.77, 1.0, 1.0, 1.0],
+    'with_h': True
+}
+
+ase_without_h = {
+    'name': 'ase',
+    'atom_encoder': {'C': 0, 'N': 1, 'O': 2, 'F': 3, 'P': 4, 'S': 5, 'Cl': 6},
+    'atom_decoder': ['C', 'N', 'O', 'F', 'P', 'S', 'Cl'],
+    'atomic_nb': [6, 7, 8, 9, 15, 16, 17],  # Atomic numbers for ASE transform  
+    'max_n_nodes': 100,  # Adjustable based on typical molecular sizes
+    'colors_dic': ['C7', 'C0', 'C3', 'C1', 'C4', 'C8', 'C9'],
+    'radius_dic': [0.77, 0.77, 0.77, 0.77, 1.0, 1.0, 1.0],
+    'with_h': False
+}
+
+
 def get_dataset_info(dataset_name, remove_h):
     if dataset_name == 'qm9':
         if not remove_h:
@@ -150,5 +174,10 @@ def get_dataset_info(dataset_name, remove_h):
             return qm9_second_half
         else:
             raise Exception('Missing config for %s without hydrogens' % dataset_name)
+    elif dataset_name == 'ase':
+        if not remove_h:
+            return ase_with_h
+        else:
+            return ase_without_h
     else:
         raise Exception("Wrong dataset %s" % dataset_name)

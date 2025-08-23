@@ -61,6 +61,47 @@ def retrieve_dataloaders(cfg):
                 sequential=cfg.sequential, dataset=dataset,
                 batch_size=cfg.batch_size,
                 shuffle=shuffle)
+    elif 'ase' in cfg.dataset:
+        import build_ase_dataset
+        from configs.datasets_config import get_dataset_info
+        
+        # Get dataset configuration
+        dataset_info = get_dataset_info(cfg.dataset, cfg.remove_h)
+        
+        # Load ASE database file
+        db_file = getattr(cfg, 'ase_db_file', './data/ase/molecules.db')
+        max_entries = getattr(cfg, 'ase_max_entries', None)
+        
+        # Load and split data
+        split_data = build_ase_dataset.load_split_data(
+            db_file,
+            val_proportion=0.1,
+            test_proportion=0.1,
+            filter_size=getattr(cfg, 'filter_molecule_size', None),
+            max_entries=max_entries
+        )
+        
+        # Create transform
+        transform = build_ase_dataset.ASETransform(
+            dataset_info,
+            cfg.include_charges,
+            cfg.device,
+            cfg.sequential
+        )
+        
+        # Create dataloaders
+        dataloaders = {}
+        for key, data_list in zip(['train', 'val', 'test'], split_data):
+            dataset = build_ase_dataset.ASEDataset(data_list, transform=transform)
+            shuffle = (key == 'train') and not cfg.sequential
+
+            dataloaders[key] = build_ase_dataset.ASEDataLoader(
+                sequential=cfg.sequential, 
+                dataset=dataset,
+                batch_size=cfg.batch_size,
+                shuffle=shuffle
+            )
+        
         del split_data
         charge_scale = None
     else:

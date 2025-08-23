@@ -1,0 +1,305 @@
+import os
+import numpy as np
+import torch
+from torch.utils.data import BatchSampler, DataLoader, Dataset, SequentialSampler
+import argparse
+from qm9.data import collate as qm9_collate
+import ase.db
+
+
+def load_ase_data(db_file, max_entries=None, exclude_keys=None):
+    """
+    Load data from ASE database file.
+    
+    Parameters
+    ----------
+    db_file : str
+        Path to ASE database file (.db)
+    max_entries : int, optional
+        Maximum number of entries to load
+    exclude_keys : list, optional
+        Keys to exclude from the database query
+        
+    Returns
+    -------
+    data_list : list
+        List of molecular data arrays, each of shape (n_atoms, 4) where
+        columns are [atomic_number, x, y, z]
+    """
+    if not os.path.exists(db_file):
+        raise FileNotFoundError(f"ASE database file not found: {db_file}")
+    
+    # Connect to ASE database
+    db = ase.db.connect(db_file)
+    
+    data_list = []
+    count = 0
+    
+    # Iterate through database entries
+    for row in db.select():
+        if max_entries is not None and count >= max_entries:
+            break
+            
+        atoms = row.toatoms()
+        
+        # Get atomic numbers and positions
+        atomic_numbers = atoms.get_atomic_numbers()
+        positions = atoms.get_positions()
+        
+        # Combine into single array: [atomic_number, x, y, z]
+        mol_data = np.column_stack([atomic_numbers, positions])
+        data_list.append(mol_data)
+        
+        count += 1
+    
+    print(f"Loaded {count} molecules from ASE database: {db_file}")
+    return data_list
+
+
+def load_split_data(db_file, val_proportion=0.1, test_proportion=0.1, 
+                   filter_size=None, max_entries=None):
+    """
+    Load and split ASE database data into train/validation/test sets.
+    
+    Parameters
+    ----------
+    db_file : str
+        Path to ASE database file
+    val_proportion : float
+        Proportion of data for validation set
+    test_proportion : float  
+        Proportion of data for test set
+    filter_size : int, optional
+        If specified, only keep molecules with this many atoms
+    max_entries : int, optional
+        Maximum number of entries to load from database
+        
+    Returns
+    -------
+    tuple
+        (train_data, val_data, test_data) where each is a list of molecular arrays
+    """
+    # Load data from ASE database
+    data_list = load_ase_data(db_file, max_entries=max_entries)
+    
+    # Filter by size if requested
+    if filter_size is not None:
+        data_list = [mol for mol in data_list if mol.shape[0] == filter_size]
+        print(f"Filtered to {len(data_list)} molecules with {filter_size} atoms")
+    
+    if len(data_list) == 0:
+        raise ValueError("No data available after filtering")
+    
+    # Calculate split indices
+    n_total = len(data_list)
+    n_test = int(n_total * test_proportion)
+    n_val = int(n_total * val_proportion)
+    n_train = n_total - n_test - n_val
+    
+    print(f"Splitting data: {n_train} train, {n_val} val, {n_test} test")
+    
+    # Random shuffle and split
+    np.random.seed(42)  # For reproducible splits
+    indices = np.random.permutation(n_total)
+    
+    train_indices = indices[:n_train]
+    val_indices = indices[n_train:n_train + n_val]
+    test_indices = indices[n_train + n_val:]
+    
+    train_data = [data_list[i] for i in train_indices]
+    val_data = [data_list[i] for i in val_indices]
+    test_data = [data_list[i] for i in test_indices]
+    
+    return train_data, val_data, test_data
+
+
+class ASEDataset(Dataset):
+    def __init__(self, data_list, transform=None):
+        """
+        ASE dataset class.
+        
+        Parameters
+        ----------
+        data_list : list
+            List of molecular data arrays
+        transform : callable, optional
+            Optional transform to be applied on a sample
+        """
+        self.transform = transform
+        
+        # Sort the data list by size
+        lengths = [mol.shape[0] for mol in data_list]
+        argsort = np.argsort(lengths)
+        self.data_list = [data_list[i] for i in argsort]
+        
+        # Store indices where the size changes
+        self.split_indices = np.unique(np.sort(lengths), return_index=True)[1][1:]
+
+    def __len__(self):
+        return len(self.data_list)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        sample = self.data_list[idx]
+        if self.transform:
+            sample = self.transform(sample)
+        return sample
+
+
+class CustomBatchSampler(BatchSampler):
+    """Creates batches where all molecules have the same size."""
+    
+    def __init__(self, sampler, batch_size, drop_last, split_indices):
+        super().__init__(sampler, batch_size, drop_last)
+        self.split_indices = split_indices
+
+    def __iter__(self):
+        batch = []
+        split_idx = 0
+        for idx in self.sampler:
+            if split_idx < len(self.split_indices) and idx >= self.split_indices[split_idx]:
+                # Yield current batch if we're moving to molecules of different size
+                if len(batch) > 0:
+                    yield batch
+                    batch = []
+                split_idx += 1
+            
+            batch.append(idx)
+            if len(batch) == self.batch_size:
+                yield batch
+                batch = []
+        
+        if len(batch) > 0 and not self.drop_last:
+            yield batch
+
+
+def collate_fn(batch):
+    """Collate function for ASE datasets."""
+    batch = {prop: qm9_collate.batch_stack([mol[prop] for mol in batch])
+             for prop in batch[0].keys()}
+
+    atom_mask = batch['atom_mask']
+
+    # Obtain edges
+    batch_size, n_nodes = atom_mask.size()
+    edge_mask = atom_mask.unsqueeze(1) * atom_mask.unsqueeze(2)
+
+    # mask diagonal
+    diag_mask = ~torch.eye(edge_mask.size(1), dtype=torch.bool,
+                           device=edge_mask.device).unsqueeze(0)
+    edge_mask *= diag_mask
+
+    batch['edge_mask'] = edge_mask.view(batch_size * n_nodes * n_nodes, 1)
+
+    return batch
+
+
+class ASEDataLoader(DataLoader):
+    def __init__(self, sequential, dataset, batch_size, shuffle, drop_last=False):
+        if sequential:
+            # Sequential processing for memory efficiency
+            assert not shuffle
+            sampler = SequentialSampler(dataset)
+            batch_sampler = CustomBatchSampler(sampler, batch_size, drop_last,
+                                               dataset.split_indices)
+            super().__init__(dataset, batch_sampler=batch_sampler)
+        else:
+            # Random processing with padding
+            super().__init__(dataset, batch_size, shuffle=shuffle,
+                             collate_fn=collate_fn, drop_last=drop_last)
+
+
+class ASETransform(object):
+    def __init__(self, dataset_info, include_charges, device, sequential):
+        """
+        Transform for ASE dataset.
+        
+        Parameters
+        ----------
+        dataset_info : dict
+            Dataset configuration containing atomic_nb list
+        include_charges : bool
+            Whether to include charges
+        device : torch.device
+            Device to place tensors on
+        sequential : bool
+            Whether using sequential processing
+        """
+        self.atomic_number_list = torch.Tensor(dataset_info['atomic_nb'])[None, :]
+        self.device = device
+        self.include_charges = include_charges
+        self.sequential = sequential
+
+    def __call__(self, data):
+        """
+        Transform molecular data.
+        
+        Parameters
+        ----------
+        data : np.ndarray
+            Molecular data of shape (n_atoms, 4) with columns [atomic_number, x, y, z]
+            
+        Returns
+        -------
+        dict
+            Dictionary with keys: positions, one_hot, charges, atom_mask, edge_mask (if sequential)
+        """
+        n = data.shape[0]
+        new_data = {}
+        
+        # Extract positions (last 3 columns)
+        new_data['positions'] = torch.from_numpy(data[:, -3:]).float()
+        
+        # Extract atomic numbers and create one-hot encoding
+        atom_types = torch.from_numpy(data[:, 0].astype(int)[:, None])
+        one_hot = atom_types == self.atomic_number_list.long()
+        new_data['one_hot'] = one_hot
+        
+        # Handle charges
+        if self.include_charges:
+            new_data['charges'] = torch.zeros(n, 1, device=self.device)
+        else:
+            new_data['charges'] = torch.zeros(0, device=self.device)
+        
+        # Atom mask
+        new_data['atom_mask'] = torch.ones(n, device=self.device)
+
+        # Edge mask for sequential processing
+        if self.sequential:
+            edge_mask = torch.ones((n, n), device=self.device)
+            edge_mask[~torch.eye(edge_mask.shape[0], dtype=torch.bool)] = 0
+            new_data['edge_mask'] = edge_mask.flatten()
+            
+        return new_data
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--db_file", type=str, required=True,
+                        help="Path to ASE database file (.db)")
+    parser.add_argument("--max_entries", type=int, default=None,
+                        help="Maximum number of entries to load")
+    parser.add_argument("--filter_size", type=int, default=None,
+                        help="Filter molecules by number of atoms")
+    parser.add_argument("--val_proportion", type=float, default=0.1,
+                        help="Proportion of data for validation")
+    parser.add_argument("--test_proportion", type=float, default=0.1,
+                        help="Proportion of data for test")
+    
+    args = parser.parse_args()
+    
+    # Load and split data
+    train_data, val_data, test_data = load_split_data(
+        args.db_file,
+        val_proportion=args.val_proportion,
+        test_proportion=args.test_proportion,
+        filter_size=args.filter_size,
+        max_entries=args.max_entries
+    )
+    
+    print(f"Data split completed:")
+    print(f"  Train: {len(train_data)} molecules")
+    print(f"  Val: {len(val_data)} molecules") 
+    print(f"  Test: {len(test_data)} molecules")
