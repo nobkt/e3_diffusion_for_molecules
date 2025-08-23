@@ -57,8 +57,12 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
         n_nodes = 19
     elif args.dataset == 'geom':
         n_nodes = 44
+    elif args.dataset == 'ase':
+        # For ASE datasets, use a reasonable default size for typical molecules
+        # Can be adjusted based on the specific ASE dataset being used
+        n_nodes = 25
     else:
-        raise ValueError()
+        raise ValueError(f"Unsupported dataset: {args.dataset}")
 
     # TODO FIX: This conditioning just zeros.
     if args.context_node_nf > 0:
@@ -102,7 +106,7 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
                 print('Did not find stable molecule, showing last sample.')
 
     else:
-        raise ValueError
+        raise ValueError(f"Unsupported probabilistic_model: {args.probabilistic_model}")
 
     return one_hot, charges, x
 
@@ -149,7 +153,7 @@ def sample(args, device, generative_model, dataset_info,
             assert_correctly_masked(charges.float(), node_mask)
 
     else:
-        raise ValueError(args.probabilistic_model)
+        raise ValueError(f"Unsupported probabilistic_model: {args.probabilistic_model}")
 
     return one_hot, charges, x, node_mask
 
