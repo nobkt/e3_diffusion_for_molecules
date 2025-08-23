@@ -86,16 +86,22 @@ class DistributionNodes:
     def log_prob(self, batch_n_nodes):
         assert len(batch_n_nodes.size()) == 1
 
-        idcs = [self.keys[i.item()] for i in batch_n_nodes]
-        idcs = torch.tensor(idcs).to(batch_n_nodes.device)
-
+        idcs = []
+        log_probs = []
+        
         log_p = torch.log(self.prob + 1e-30)
-
         log_p = log_p.to(batch_n_nodes.device)
-
-        log_probs = log_p[idcs]
-
-        return log_probs
+        
+        for i in batch_n_nodes:
+            node_count = i.item()
+            if node_count in self.keys:
+                idx = self.keys[node_count]
+                log_probs.append(log_p[idx])
+            else:
+                # Assign very low probability for unknown node counts
+                log_probs.append(torch.tensor(-30.0).to(batch_n_nodes.device))
+        
+        return torch.stack(log_probs)
 
 
 class DistributionProperty:
