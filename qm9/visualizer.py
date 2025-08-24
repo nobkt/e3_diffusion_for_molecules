@@ -139,7 +139,10 @@ def plot_molecule(ax, positions, atom_type, alpha, spheres_3d, hex_bg_color,
                 # Draw edge outputs 1 / -1 value, convert to True / False.
                 line_width = 2
             else:
-                raise Exception('Wrong dataset_info name')
+                # For unknown dataset types, default to using get_bond_order method
+                # This prevents Exception when dataset name doesn't match expected values
+                draw_edge_int = bond_analyze.get_bond_order(atom1, atom2, dist)
+                line_width = (3 - 2) * 2 * 2
             draw_edge = draw_edge_int > 0
             if draw_edge:
                 if draw_edge_int == 4:
@@ -199,7 +202,12 @@ def plot_data3d(positions, atom_type, dataset_info, camera_elev=0, camera_azim=0
         ax.set_ylim(-axis_lim, axis_lim)
         ax.set_zlim(-axis_lim, axis_lim)
     else:
-        raise ValueError(dataset_info['name'])
+        # For unknown dataset types, default to qm9 behavior
+        max_value = positions.abs().max().item()
+        axis_lim = min(40, max(max_value / 1.5 + 0.3, 3.2))
+        ax.set_xlim(-axis_lim, axis_lim)
+        ax.set_ylim(-axis_lim, axis_lim)
+        ax.set_zlim(-axis_lim, axis_lim)
 
     dpi = 120 if spheres_3d else 50
 
@@ -265,7 +273,12 @@ def plot_data3d_uncertainty(
         ax.set_ylim(-axis_lim, axis_lim)
         ax.set_zlim(-axis_lim, axis_lim)
     else:
-        raise ValueError(dataset_info['name'])
+        # For unknown dataset types, default to qm9 behavior
+        max_value = all_positions[0].abs().max().item()
+        axis_lim = min(40, max(max_value + 0.3, 3.2))
+        ax.set_xlim(-axis_lim, axis_lim)
+        ax.set_ylim(-axis_lim, axis_lim)
+        ax.set_zlim(-axis_lim, axis_lim)
 
     dpi = 120 if spheres_3d else 50
 
