@@ -3,6 +3,7 @@ from qm9.data.args import init_argparse
 from qm9.data.collate import PreprocessQM9
 from qm9.data.utils import initialize_datasets
 import os
+import numpy as np
 
 
 def retrieve_dataloaders(cfg):
@@ -92,6 +93,26 @@ def retrieve_dataloaders(cfg):
         dataset_info = dataset_info.copy()  # Make a copy to avoid modifying the original
         dataset_info['n_nodes'] = n_nodes_counts
         print(f"Computed n_nodes distribution for ASE dataset: {n_nodes_counts}")
+        
+        # Compute position statistics to help with normalization factor selection
+        position_spans = []
+        for mol_data in all_data:
+            positions = mol_data[:, 1:]  # Last 3 columns are positions
+            if positions.shape[0] > 1:  # Only for molecules with multiple atoms
+                mol_span = np.max(positions) - np.min(positions)
+                position_spans.append(mol_span)
+        
+        if position_spans:
+            median_span = np.median(position_spans)
+            max_span = np.max(position_spans)
+            print(f"ASE dataset position analysis: median_span={median_span:.2f}Å, max_span={max_span:.2f}Å")
+            
+            # Store statistics for potential automatic normalization factor adjustment
+            dataset_info['position_stats'] = {
+                'median_span': median_span,
+                'max_span': max_span,
+                'spans': position_spans
+            }
         
         # Create transform
         transform = build_ase_dataset.ASETransform(

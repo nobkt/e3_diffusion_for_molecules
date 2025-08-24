@@ -134,10 +134,23 @@ atom_decoder = dataset_info['atom_decoder']
 # Set appropriate normalization factors based on dataset
 if args.normalize_factors is None:
     if args.dataset == 'ase':
-        # ASE datasets have more atom types (8 with H, 7 without H) compared to QM9 (5 with H, 4 without H)
-        # Use higher categorical normalization factor similar to GEOM dataset
-        args.normalize_factors = [1, 8, 1]
+        # ASE datasets can have molecules with large coordinate spreads
+        # Use larger position normalization factor to handle molecules with large spans
+        # Position factor of 10 helps with molecules that span 10+ Angstroms
+        args.normalize_factors = [10, 8, 1]
         print(f"Using ASE-optimized normalization factors: {args.normalize_factors}")
+        
+        # If we have position statistics, provide recommendations
+        if hasattr(dataset_info, 'position_stats') and 'max_span' in dataset_info['position_stats']:
+            max_span = dataset_info['position_stats']['max_span']
+            median_span = dataset_info['position_stats']['median_span']
+            
+            # Suggest position normalization factor based on data
+            if max_span > 20:
+                suggested_pos_norm = max(20, max_span / 2)
+                print(f"  Recommendation: Consider using position normalization factor of ~{suggested_pos_norm:.0f} for large molecules (max_span={max_span:.1f}Å)")
+            elif max_span < 3:
+                print(f"  Note: Molecules are small (max_span={max_span:.1f}Å), position factor of 1-5 might be sufficient")
     elif args.dataset == 'geom':
         # GEOM datasets have many atom types (16 with H, 15 without H)
         args.normalize_factors = [1, 4, 10]
