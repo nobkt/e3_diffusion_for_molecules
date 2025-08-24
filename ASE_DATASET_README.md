@@ -1,14 +1,33 @@
 # ASE Database Dataset Loading
 
-This document describes the ASE (Atomic Simulation Environment) database loading functionality added to the e3_diffusion_for_molecules repository.
+This document describes the ASE (Atomic Simulation Environment) database loading functionality and includes important fixes for training stability.
 
 ## Overview
 
 The ASE dataset loading feature allows you to load molecular datasets directly from ASE database files (`.db` format) for use with the diffusion model pipeline. This provides a convenient way to work with molecular data stored in ASE's standardized database format.
 
+## Important: High Loss Issue Fix
+
+**If you experienced high loss values (~30+) when training with ASE datasets, this has been fixed!**
+
+The issue was caused by molecules with large coordinate spreads (>50Å) in ASE databases. The solution is to use appropriate normalization factors:
+
+- **New ASE default**: `[10, 8, 1]` (automatically applied)
+- **Old problematic default**: `[1, 8, 1]` (caused numerical instability)
+
+## Quick Start
+
+```bash
+# Basic ASE training (uses optimized defaults automatically)
+python main_qm9.py --dataset ase --ase_db_file ./your_molecules.db \
+    --n_epochs 10 --exp_name my_ase_experiment
+```
+
 ## Features
 
 - Load molecular structures from ASE database files
+- **Automatic normalization factor optimization** for stable training
+- **Smart diagnostics** that analyze molecular size distributions
 - Automatic train/validation/test splitting
 - Support for filtering by molecule size
 - Compatible with existing diffusion model pipeline
