@@ -113,8 +113,8 @@ parser.add_argument('--ema_decay', type=float, default=0.999,
 parser.add_argument('--augment_noise', type=float, default=0)
 parser.add_argument('--n_stability_samples', type=int, default=500,
                     help='Number of samples to compute the stability')
-parser.add_argument('--normalize_factors', type=eval, default=[1, 4, 1],
-                    help='normalize factors for [x, categorical, integer]')
+parser.add_argument('--normalize_factors', type=eval, default=None,
+                    help='normalize factors for [x, categorical, integer]. If None, will be set automatically based on dataset.')
 parser.add_argument('--remove_h', action='store_true')
 parser.add_argument('--include_charges', type=eval, default=True,
                     help='include atom charge or not')
@@ -130,6 +130,24 @@ dataset_info = get_dataset_info(args.dataset, args.remove_h)
 
 atom_encoder = dataset_info['atom_encoder']
 atom_decoder = dataset_info['atom_decoder']
+
+# Set appropriate normalization factors based on dataset
+if args.normalize_factors is None:
+    if args.dataset == 'ase':
+        # ASE datasets have more atom types (8 with H, 7 without H) compared to QM9 (5 with H, 4 without H)
+        # Use higher categorical normalization factor similar to GEOM dataset
+        args.normalize_factors = [1, 8, 1]
+        print(f"Using ASE-optimized normalization factors: {args.normalize_factors}")
+    elif args.dataset == 'geom':
+        # GEOM datasets have many atom types (16 with H, 15 without H)
+        args.normalize_factors = [1, 4, 10]
+        print(f"Using GEOM-optimized normalization factors: {args.normalize_factors}")
+    else:
+        # QM9 and other small datasets
+        args.normalize_factors = [1, 4, 1]
+        print(f"Using QM9-optimized normalization factors: {args.normalize_factors}")
+else:
+    print(f"Using user-specified normalization factors: {args.normalize_factors}")
 
 # args, unparsed_args = parser.parse_known_args()
 args.wandb_usr = utils.get_wandb_username(args.wandb_usr)

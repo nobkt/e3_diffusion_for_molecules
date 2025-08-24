@@ -49,6 +49,21 @@ cfg = SimpleNamespace(
 dataloaders, charge_scale = retrieve_dataloaders(cfg)
 ```
 
+### Training with ASE Datasets
+
+ASE datasets are automatically configured with optimized normalization factors:
+
+```bash
+python main_qm9.py \
+    --dataset ase \
+    --ase_db_file /path/to/molecules.db \
+    --exp_name my_ase_experiment \
+    --n_epochs 100 \
+    --batch_size 32
+```
+
+**Important**: ASE datasets automatically use normalization factors `[1, 8, 1]` which are optimized for the larger number of atom types (8 types: H, C, N, O, F, P, S, Cl) compared to QM9's 5 types. This prevents the loss scaling issues that occurred in previous versions.
+
 ### Configuration Parameters
 
 | Parameter | Type | Description |
@@ -161,6 +176,16 @@ python test_ase_dataset.py
 - Use `ase_max_entries` to limit the number of molecules loaded
 - Reduce `batch_size` for memory-constrained environments
 - Consider using `sequential=True` for more memory-efficient processing
+
+**Loss is much larger than expected**
+- This issue has been fixed in the latest version
+- ASE datasets now automatically use optimized normalization factors `[1, 8, 1]`
+- If you're still experiencing issues, you can manually set `--normalize_factors [1, 8, 1]` when training
+
+**Molecules fall apart during sampling**
+- This was caused by improper normalization factors and should be fixed with the automatic factor selection
+- Ensure you're using the latest version of the code
+- Consider reducing the diffusion steps or adjusting the noise schedule if issues persist
 
 ## Integration with Existing Models
 
