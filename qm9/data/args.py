@@ -180,7 +180,7 @@ def setup_shared_args(parser):
                         help='Use gaussian mask instead of sigmoid mask.')
 
     parser.add_argument('--edge-cat', action='store_true',
-                        help='Concatenate the scalars from different \ell in the dot-product-matrix part of the edge network.')
+                        help=r'Concatenate the scalars from different \ell in the dot-product-matrix part of the edge network.')
     parser.add_argument('--target', type=str, default='',
                         help='Learning target for a dataset (such as qm9) with multiple options.')
 

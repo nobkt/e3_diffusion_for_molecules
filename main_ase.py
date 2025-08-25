@@ -126,6 +126,14 @@ def create_ase_parser():
     parser.add_argument('--test_epochs', type=int, default=1)
     parser.add_argument('--data_augmentation', type=eval, default=False, help="Data augmentation")
     parser.add_argument('--normalize_factors', type=eval, default=[1, 4, 1], help="normalize factors")
+    
+    # Add missing arguments for EGNN model
+    parser.add_argument('--normalization_factor', type=float, default=1,
+                        help="Normalize the sum aggregation of EGNN")
+    parser.add_argument('--aggregation_method', type=str, default='sum',
+                        help='"sum" or "mean"')
+    parser.add_argument('--norm_constant', type=float, default=1,
+                        help="Normalize constant")
 
     return parser
 
@@ -164,8 +172,24 @@ def main_ase():
     # Get dataloaders
     dataloaders, charge_scale = dataset.retrieve_dataloaders(args)
     
+    # Setup context node features like in main_qm9.py
+    if len(args.conditioning) > 0:
+        print(f'Conditioning on {args.conditioning}')
+        property_norms = compute_mean_mad(dataloaders, args.conditioning, args.dataset)
+        data_dummy = next(iter(dataloaders['train']))
+        context_dummy = prepare_context(args.conditioning, data_dummy, property_norms)
+        context_node_nf = context_dummy.size(2)
+    else:
+        context_node_nf = 0
+        property_norms = None
+
+    args.context_node_nf = context_node_nf
+    
     # Create model
-    model, nodes_dist, prop_dist = get_model(args, device, dataset_info, datadir=args.datadir)
+    model, nodes_dist, prop_dist = get_model(args, device, dataset_info, dataloaders['train'])
+    if prop_dist is not None:
+        prop_dist.set_normalizer(property_norms)
+    model = model.to(device)
     
     # Setup optimizer
     optim = get_optim(args, model)
@@ -174,12 +198,6 @@ def main_ase():
     # Setup for training
     gradnorm_queue = utils.Queue()
     gradnorm_queue.add(3000)  # Add large value so that first few iterations are not skipped.
-
-    # Get property normalizations
-    if len(args.conditioning) > 0:
-        property_norms = compute_mean_mad(dataloaders, args.conditioning, dataset_info)
-    else:
-        property_norms = None
 
     # Optionally resume from checkpoint
     if args.resume is not None:
