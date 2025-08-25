@@ -78,6 +78,11 @@ def create_ase_parser():
                         help='normalize the coordinates difference')
     parser.add_argument('--coord_agg', type=str, default='mean',
                         help='mean | sum')
+    parser.add_argument('--sin_embedding', type=eval, default=False,
+                        help='whether using or not the sin embedding')
+    
+    # ODE regularization
+    parser.add_argument('--ode_regularization', type=float, default=1e-3)
 
     # Data args
     parser.add_argument('--dataset', type=str, default='qm9',
