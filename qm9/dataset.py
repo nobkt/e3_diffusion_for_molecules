@@ -2,11 +2,22 @@ from torch.utils.data import DataLoader
 from qm9.data.args import init_argparse
 from qm9.data.collate import PreprocessQM9
 from qm9.data.utils import initialize_datasets
+from qm9.ase_interface import ASEDatasetInterface
+from qm9.data.dataset_class import ProcessedDataset
 import os
+import logging
 
 
 def retrieve_dataloaders(cfg):
-    if 'qm9' in cfg.dataset:
+    # Check if ASE DB should be used
+    use_ase_db = getattr(cfg, 'use_ase_db', False)
+    ase_db_path = getattr(cfg, 'ase_db_path', None)
+    
+    if 'qm9' in cfg.dataset and use_ase_db and ase_db_path:
+        # Load data from ASE database
+        logging.info(f"Loading QM9 data from ASE database: {ase_db_path}")
+        return retrieve_dataloaders_from_ase_db(cfg, ase_db_path)
+    elif 'qm9' in cfg.dataset:
         batch_size = cfg.batch_size
         num_workers = cfg.num_workers
         filter_n_atoms = cfg.filter_n_atoms
@@ -66,6 +77,100 @@ def retrieve_dataloaders(cfg):
     else:
         raise ValueError(f'Unknown dataset {cfg.dataset}')
 
+    return dataloaders, charge_scale
+
+
+def retrieve_dataloaders_from_ase_db(cfg, ase_db_path):
+    """
+    Retrieve dataloaders from ASE database.
+    
+    Parameters
+    ----------
+    cfg : object
+        Configuration object with dataset parameters
+    ase_db_path : str
+        Path to ASE database file
+        
+    Returns
+    -------
+    dataloaders : dict
+        Dictionary of dataloaders for each split
+    charge_scale : None
+        Charge scale (placeholder for compatibility)
+    """
+    import torch
+    
+    if not os.path.exists(ase_db_path):
+        raise FileNotFoundError(f"ASE database not found: {ase_db_path}")
+    
+    # Load data from ASE database
+    ase_interface = ASEDatasetInterface(ase_db_path)
+    molecules_data = ase_interface.load_molecules_from_db()
+    ase_interface.close()
+    
+    if not molecules_data:
+        raise ValueError("No data loaded from ASE database")
+    
+    # Convert units (same as NPZ version)
+    qm9_to_eV = {'U0': 27.2114, 'U': 27.2114, 'G': 27.2114, 'H': 27.2114, 'zpve': 27211.4, 'gap': 27.2114, 'homo': 27.2114,
+                 'lumo': 27.2114}
+    
+    # Get species information
+    all_species = []
+    for split_data in molecules_data.values():
+        if 'charges' in split_data:
+            split_species = split_data['charges'].unique(sorted=True)
+            if split_species[0] == 0:
+                split_species = split_species[1:]
+            all_species.append(split_species)
+    
+    if all_species:
+        all_species = all_species[0]  # Assume all splits have same species
+    else:
+        all_species = torch.tensor([1, 6, 7, 8, 9])  # Default QM9 species
+    
+    # Create ProcessedDataset objects
+    datasets = {}
+    num_pts = {'train': getattr(cfg, 'num_train', -1),
+               'test': getattr(cfg, 'num_test', -1), 
+               'valid': getattr(cfg, 'num_valid', -1)}
+    
+    for split, data in molecules_data.items():
+        datasets[split] = ProcessedDataset(
+            data, 
+            num_pts=num_pts.get(split, -1),
+            included_species=all_species,
+            subtract_thermo=getattr(cfg, 'subtract_thermo', False)
+        )
+        
+        # Convert units
+        datasets[split].convert_units(qm9_to_eV)
+    
+    # Apply atom filtering if specified
+    filter_n_atoms = getattr(cfg, 'filter_n_atoms', None)
+    if filter_n_atoms is not None:
+        logging.info(f"Retrieving molecules with only {filter_n_atoms} atoms")
+        datasets = filter_atoms(datasets, filter_n_atoms)
+    
+    # Create dataloaders
+    batch_size = getattr(cfg, 'batch_size', 32)
+    num_workers = getattr(cfg, 'num_workers', 1)
+    include_charges = getattr(cfg, 'include_charges', True)
+    
+    preprocess = PreprocessQM9(load_charges=include_charges)
+    dataloaders = {
+        split: DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=(split == 'train'),
+            num_workers=num_workers,
+            collate_fn=preprocess.collate_fn
+        ) for split, dataset in datasets.items()
+    }
+    
+    logging.info(f"Successfully loaded dataloaders from ASE database: {ase_db_path}")
+    charge_scale = None  # Placeholder for compatibility
+    
     return dataloaders, charge_scale
 
 
