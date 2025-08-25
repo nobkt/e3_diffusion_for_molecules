@@ -87,7 +87,8 @@ parser.add_argument('--ase_db_file', type=str, default='./data/ase/molecules.db'
 parser.add_argument('--ase_max_entries', type=int, default=None,
                     help='Maximum number of entries to load from ASE database (None = all)')
 parser.add_argument('--validate_ase_db', action='store_true',
-                    help='Validate ASE database quality before training (use with --dataset ase)')
+                    help='Validate ASE database quality before training (use with --dataset ase). '
+                         'Example: python main_qm9.py --dataset ase --ase_db_file molecules.db --validate_ase_db')
 parser.add_argument('--dequantization', type=str, default='argmax_variational',
                     help='uniform | variational | argmax_variational | deterministic')
 parser.add_argument('--n_report_steps', type=int, default=1)
