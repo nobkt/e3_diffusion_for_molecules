@@ -163,11 +163,11 @@ def _get_species(datasets, ignore_check=False):
         sorted=True) for split, species in datasets.items()}
 
     # If zero charges (padded, non-existent atoms) are included, remove them
-    if all_species[0] == 0:
+    if len(all_species) > 0 and all_species[0] == 0:
         all_species = all_species[1:]
 
-    # Remove zeros if zero-padded charges exst for each split
-    split_species = {split: species[1:] if species[0] ==
+    # Remove zeros if zero-padded charges exist for each split
+    split_species = {split: species[1:] if len(species) > 0 and species[0] ==
                      0 else species for split, species in split_species.items()}
 
     # Now check that each split has at least one example of every atomic spcies from the entire dataset.
@@ -182,3 +182,96 @@ def _get_species(datasets, ignore_check=False):
 
     # Finally, return a list of all species
     return all_species
+
+
+def initialize_ase_datasets(args, db_path, max_molecules=None, include_properties=None,
+                           remove_h=False, train_ratio=0.8, valid_ratio=0.1, test_ratio=0.1):
+    """
+    Initialize ASE database datasets.
+
+    Parameters
+    ----------
+    args : dict
+        Dictionary of input arguments detailing the calculation.
+    db_path : str
+        Path to the ASE database file.
+    max_molecules : int, optional
+        Maximum number of molecules to load. If None, loads all molecules.
+    include_properties : list, optional
+        List of properties to include from the database.
+    remove_h : bool, optional
+        If True, remove hydrogens from the dataset
+    train_ratio, valid_ratio, test_ratio : float
+        Data split ratios
+
+    Returns
+    -------
+    args : dict
+        Dictionary of input arguments detailing the calculation.
+    datasets : dict
+        Dictionary of processed dataset objects.
+        Valid keys are "train", "test", and "valid".  
+    num_species : int
+        Number of unique atomic species in the dataset.
+    max_charge : pytorch.Tensor
+        Largest atomic number for the dataset.
+    """
+    from qm9.data.prepare.ase_db import process_ase_database, create_ase_splits
+
+    # Set the number of points based upon the arguments  
+    num_pts = {'train': args.num_train,
+               'test': args.num_test, 'valid': args.num_valid}
+
+    # Process ASE database
+    data = process_ase_database(db_path, max_molecules, include_properties)
+    
+    # Create splits
+    datasets_dict = create_ase_splits(data, train_ratio, valid_ratio, test_ratio)
+
+    # Remove hydrogens if requested
+    if remove_h:
+        for key, dataset in datasets_dict.items():
+            pos = dataset['positions']
+            charges = dataset['charges']
+            num_atoms = dataset['num_atoms']
+
+            # Check that charges corresponds to real atoms
+            assert torch.sum(num_atoms != torch.sum(charges > 0, dim=1)) == 0
+
+            mask = dataset['charges'] > 1
+            new_positions = torch.zeros_like(pos)
+            new_charges = torch.zeros_like(charges)
+            for i in range(new_positions.shape[0]):
+                m = mask[i]
+                p = pos[i][m]   # positions to keep
+                p = p - torch.mean(p, dim=0)    # Center the new positions
+                c = charges[i][m]   # Charges to keep
+                n = torch.sum(m)
+                new_positions[i, :n, :] = p
+                new_charges[i, :n] = c
+
+            dataset['positions'] = new_positions
+            dataset['charges'] = new_charges
+            dataset['num_atoms'] = torch.sum(dataset['charges'] > 0, dim=1)
+
+    # Get a list of all species across the entire dataset
+    all_species = _get_species(datasets_dict, ignore_check=False)
+
+    # Now initialize MolecularDataset based upon loaded data
+    datasets = {split: ProcessedDataset(data, num_pts=num_pts.get(
+        split, -1), included_species=all_species, subtract_thermo=False) for split, data in datasets_dict.items()}
+
+    # Check that all datasets have the same included species:
+    assert(len(set(tuple(data.included_species.tolist()) for data in datasets.values())) ==
+           1), 'All datasets must have same included_species! {}'.format({key: data.included_species for key, data in datasets.items()})
+
+    # These parameters are necessary to initialize the network
+    num_species = datasets['train'].num_species
+    max_charge = datasets['train'].max_charge
+
+    # Now, update the number of training/test/validation sets in args
+    args.num_train = datasets['train'].num_pts
+    args.num_valid = datasets['valid'].num_pts
+    args.num_test = datasets['test'].num_pts
+
+    return args, datasets, num_species, max_charge

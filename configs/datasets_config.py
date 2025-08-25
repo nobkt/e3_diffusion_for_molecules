@@ -150,5 +150,40 @@ def get_dataset_info(dataset_name, remove_h):
             return qm9_second_half
         else:
             raise Exception('Missing config for %s without hydrogens' % dataset_name)
+    elif 'ase' in dataset_name:
+        # For ASE datasets, we need to dynamically generate the config
+        # This will be done in the dataset preparation step
+        return get_default_ase_config(remove_h)
     else:
         raise Exception("Wrong dataset %s" % dataset_name)
+
+
+def get_default_ase_config(remove_h=False):
+    """
+    Get default configuration for ASE datasets.
+    This is a placeholder that will be updated with actual dataset statistics.
+    """
+    if remove_h:
+        return {
+            'name': 'ase',
+            'atom_encoder': {'C': 0, 'N': 1, 'O': 2},  # Will be updated dynamically
+            'atom_decoder': ['C', 'N', 'O'],  # Will be updated dynamically
+            'max_n_nodes': 50,  # Will be updated dynamically
+            'n_nodes': {},  # Will be updated dynamically
+            'atom_types': {},  # Will be updated dynamically
+            'colors_dic': ['C0', 'C1', 'C2'],  # Will be updated dynamically
+            'radius_dic': [0.77, 0.77, 0.77],  # Will be updated dynamically
+            'with_h': False
+        }
+    else:
+        return {
+            'name': 'ase',
+            'atom_encoder': {'H': 0, 'C': 1, 'N': 2, 'O': 3},  # Will be updated dynamically
+            'atom_decoder': ['H', 'C', 'N', 'O'],  # Will be updated dynamically
+            'max_n_nodes': 50,  # Will be updated dynamically
+            'n_nodes': {},  # Will be updated dynamically
+            'atom_types': {},  # Will be updated dynamically
+            'colors_dic': ['#FFFFFF99', 'C7', 'C0', 'C3'],  # Will be updated dynamically
+            'radius_dic': [0.46, 0.77, 0.77, 0.77],  # Will be updated dynamically
+            'with_h': True
+        }

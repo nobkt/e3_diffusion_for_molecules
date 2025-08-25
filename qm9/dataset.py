@@ -63,6 +63,40 @@ def retrieve_dataloaders(cfg):
                 shuffle=shuffle)
         del split_data
         charge_scale = None
+    elif 'ase' in cfg.dataset:
+        from qm9.data.utils import initialize_ase_datasets
+        from qm9.data.args import init_argparse
+        
+        batch_size = cfg.batch_size
+        num_workers = cfg.num_workers
+        filter_n_atoms = cfg.filter_n_atoms
+        
+        # Initialize dataloader args
+        args = init_argparse('ase')
+        
+        # Initialize ASE datasets
+        args, datasets, num_species, charge_scale = initialize_ase_datasets(
+            args, cfg.datadir, 
+            max_molecules=getattr(cfg, 'max_molecules', None),
+            include_properties=getattr(cfg, 'include_properties', None),
+            remove_h=cfg.remove_h
+        )
+        
+        # No unit conversion needed for ASE datasets by default
+        # Users can add conversion factors in the dataset config if needed
+        
+        if filter_n_atoms is not None:
+            print("Retrieving molecules with only %d atoms" % filter_n_atoms)
+            datasets = filter_atoms(datasets, filter_n_atoms)
+
+        # Construct PyTorch dataloaders from datasets
+        preprocess = PreprocessQM9(load_charges=cfg.include_charges)
+        dataloaders = {split: DataLoader(dataset,
+                                         batch_size=batch_size,
+                                         shuffle=args.shuffle if (split == 'train') else False,
+                                         num_workers=num_workers,
+                                         collate_fn=preprocess.collate_fn)
+                                 for split, dataset in datasets.items()}
     else:
         raise ValueError(f'Unknown dataset {cfg.dataset}')
 
