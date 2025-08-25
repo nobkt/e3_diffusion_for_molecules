@@ -137,27 +137,29 @@ geom_no_h = {
 # ASE dataset configurations
 ase_with_h = {
     'name': 'ase',
-    'atom_encoder': {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4, 'P': 5, 'S': 6, 'Cl': 7},
-    'atom_decoder': ['H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl'],
-    'atomic_nb': [1, 6, 7, 8, 9, 15, 16, 17],  # Atomic numbers for ASE transform
+    # Use QM9-compatible atom encoding for consistency
+    'atom_encoder': {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4},
+    'atom_decoder': ['H', 'C', 'N', 'O', 'F'],
+    'atomic_nb': [1, 6, 7, 8, 9],  # QM9-compatible atomic numbers
     'max_n_nodes': 100,  # Adjustable based on typical molecular sizes
     # Placeholder n_nodes distribution - will be computed dynamically from dataset
     'n_nodes': {2: 100, 3: 200, 4: 150, 5: 100, 6: 80, 7: 50, 8: 30, 9: 20, 10: 10},
-    'colors_dic': ['#FFFFFF99', 'C7', 'C0', 'C3', 'C1', 'C4', 'C8', 'C9'],
-    'radius_dic': [0.46, 0.77, 0.77, 0.77, 0.77, 1.0, 1.0, 1.0],
+    'colors_dic': ['#FFFFFF99', 'C7', 'C0', 'C3', 'C1'],  # Match QM9 colors
+    'radius_dic': [0.46, 0.77, 0.77, 0.77, 0.77],  # Match QM9 radii
     'with_h': True
 }
 
 ase_without_h = {
     'name': 'ase',
-    'atom_encoder': {'C': 0, 'N': 1, 'O': 2, 'F': 3, 'P': 4, 'S': 5, 'Cl': 6},
-    'atom_decoder': ['C', 'N', 'O', 'F', 'P', 'S', 'Cl'],
-    'atomic_nb': [6, 7, 8, 9, 15, 16, 17],  # Atomic numbers for ASE transform  
+    # Use QM9-compatible atom encoding for consistency
+    'atom_encoder': {'C': 0, 'N': 1, 'O': 2, 'F': 3},
+    'atom_decoder': ['C', 'N', 'O', 'F'],
+    'atomic_nb': [6, 7, 8, 9],  # QM9-compatible atomic numbers without H
     'max_n_nodes': 100,  # Adjustable based on typical molecular sizes
     # Placeholder n_nodes distribution - will be computed dynamically from dataset
     'n_nodes': {1: 50, 2: 150, 3: 200, 4: 120, 5: 80, 6: 50, 7: 30, 8: 20},
-    'colors_dic': ['C7', 'C0', 'C3', 'C1', 'C4', 'C8', 'C9'],
-    'radius_dic': [0.77, 0.77, 0.77, 0.77, 1.0, 1.0, 1.0],
+    'colors_dic': ['C7', 'C0', 'C3', 'C1'],  # Match QM9 colors
+    'radius_dic': [0.77, 0.77, 0.77, 0.77],  # Match QM9 radii
     'with_h': False
 }
 

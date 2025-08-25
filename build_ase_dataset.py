@@ -352,23 +352,45 @@ class ASETransform(object):
         n = geometry.shape[0]
         new_data = {}
         
-        # Extract positions (last 3 columns)
+        # Extract positions (last 3 columns) - ensure float32 for compatibility
         new_data['positions'] = torch.from_numpy(geometry[:, -3:]).float()
         
         # Extract atomic numbers and create one-hot encoding
         atom_types = torch.from_numpy(geometry[:, 0].astype(int)[:, None])
+        
+        # Handle atoms not in QM9 atom set by mapping them to the closest equivalent
+        # or filtering them out based on configuration
+        qm9_atomic_numbers = set(self.atomic_number_list.squeeze().tolist())
+        valid_atoms = []
+        
+        for i, atomic_num in enumerate(geometry[:, 0].astype(int)):
+            if atomic_num in qm9_atomic_numbers:
+                valid_atoms.append(i)
+            else:
+                # For molecules with atoms not in QM9 set, we could either:
+                # 1. Skip the entire molecule (current approach)
+                # 2. Map to closest atom type
+                # 3. Use a special "other" category
+                print(f"Warning: Atom with atomic number {atomic_num} not in QM9 atom set, skipping molecule")
+                return None  # Skip this molecule
+        
+        if len(valid_atoms) != len(geometry):
+            print(f"Warning: Molecule contains non-QM9 atoms, skipping")
+            return None
+        
         one_hot = (atom_types == self.atomic_number_list.long()).float()
         new_data['one_hot'] = one_hot
         
         # Handle charges - for consistency with QM9, create charges based on atomic numbers
+        # Ensure we use float32 for compatibility
         if self.include_charges:
             # Use atomic numbers as charges for compatibility
-            new_data['charges'] = torch.from_numpy(geometry[:, 0].astype(float)[:, None])
+            new_data['charges'] = torch.from_numpy(geometry[:, 0].astype(np.float32)[:, None])
         else:
             new_data['charges'] = torch.zeros(0, device=self.device)
         
-        # Atom mask
-        new_data['atom_mask'] = torch.ones(n, device=self.device)
+        # Atom mask - ensure float32 tensor on correct device
+        new_data['atom_mask'] = torch.ones(n, dtype=torch.bool, device=self.device)
 
         # Edge mask for sequential processing
         if self.sequential:
@@ -377,14 +399,27 @@ class ASETransform(object):
             new_data['edge_mask'] = edge_mask.flatten()
         
         # Add molecular properties for compatibility with QM9 dataset
+        # Property key mapping from ASE format to QM9 format
+        property_mapping = {
+            'U0_Ha': 'U0',
+            'HOMO_Ha': 'HOMO', 
+            'LUMO_Ha': 'LUMO',
+            'gap_Ha': 'gap',
+            'ZPVE_Ha': 'zpve',
+            # alpha stays the same
+        }
+        
         for prop_name, prop_value in properties.items():
             try:
-                # Try to convert to numeric tensor
+                # Map property names to QM9 format
+                qm9_prop_name = property_mapping.get(prop_name, prop_name)
+                
+                # Try to convert to numeric tensor with float32 dtype
                 if isinstance(prop_value, (int, float)):
-                    new_data[prop_name] = torch.tensor(float(prop_value))
+                    new_data[qm9_prop_name] = torch.tensor(float(prop_value), dtype=torch.float32)
                 elif isinstance(prop_value, str):
                     # Try to parse string as number
-                    new_data[prop_name] = torch.tensor(float(prop_value))
+                    new_data[qm9_prop_name] = torch.tensor(float(prop_value), dtype=torch.float32)
                 else:
                     # Skip non-numeric properties to avoid collate issues
                     continue
