@@ -2,11 +2,12 @@ from torch.utils.data import DataLoader
 from qm9.data.args import init_argparse
 from qm9.data.collate import PreprocessQM9
 from qm9.data.utils import initialize_datasets
+from qm9.ase_db_dataset import load_ase_db_datasets
 import os
 
 
 def retrieve_dataloaders(cfg):
-    if 'qm9' in cfg.dataset:
+    if 'qm9' in cfg.dataset and not cfg.dataset.startswith('ase_db'):
         batch_size = cfg.batch_size
         num_workers = cfg.num_workers
         filter_n_atoms = cfg.filter_n_atoms
@@ -35,6 +36,51 @@ def retrieve_dataloaders(cfg):
                                          num_workers=num_workers,
                                          collate_fn=preprocess.collate_fn)
                              for split, dataset in datasets.items()}
+    elif cfg.dataset.startswith('ase_db'):
+        # Handle ASE DB datasets
+        from configs.datasets_config import get_dataset_info
+        
+        # Get database path from config
+        if hasattr(cfg, 'ase_db_path'):
+            db_path = cfg.ase_db_path
+        else:
+            # Default path for ASE DB QM9
+            db_path = os.path.join(cfg.datadir, 'qm9_ase.db')
+        
+        if not os.path.exists(db_path):
+            raise FileNotFoundError(f"ASE database file not found: {db_path}")
+        
+        dataset_info = get_dataset_info(cfg.dataset, cfg.remove_h)
+        
+        # Load ASE DB datasets
+        datasets = load_ase_db_datasets(
+            db_path=db_path,
+            dataset_info=dataset_info,
+            split_ratio=(0.8, 0.1, 0.1),
+            remove_h=cfg.remove_h,
+            max_atoms=cfg.filter_n_atoms,
+            random_seed=42
+        )
+        
+        # Apply unit conversions if needed
+        qm9_to_eV = {'U0': 27.2114, 'U': 27.2114, 'G': 27.2114, 'H': 27.2114, 'zpve': 27211.4, 'gap': 27.2114, 'homo': 27.2114,
+                     'lumo': 27.2114}
+        
+        for dataset in datasets.values():
+            dataset.convert_units(qm9_to_eV)
+        
+        # Create dataloaders
+        batch_size = cfg.batch_size
+        num_workers = cfg.num_workers
+        
+        preprocess = PreprocessQM9(load_charges=cfg.include_charges)
+        dataloaders = {split: DataLoader(dataset,
+                                         batch_size=batch_size,
+                                         shuffle=(split == 'train'),
+                                         num_workers=num_workers,
+                                         collate_fn=preprocess.collate_fn)
+                             for split, dataset in datasets.items()}
+        charge_scale = None
     elif 'geom' in cfg.dataset:
         import build_geom_dataset
         from configs.datasets_config import get_dataset_info

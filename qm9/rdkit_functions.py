@@ -7,6 +7,16 @@ from configs.datasets_config import get_dataset_info
 import pickle
 import os
 
+# Import OpenBabel functions when available
+try:
+    from qm9.openbabel_functions import (
+        mol2smiles_ob, build_molecule_ob, build_xae_molecule_ob, 
+        BasicMolecularMetricsOB, compute_ase_db_smiles
+    )
+    openbabel_available = True
+except ImportError:
+    openbabel_available = False
+
 
 def compute_qm9_smiles(dataset_name, remove_h):
     '''
@@ -78,14 +88,24 @@ class BasicMolecularMetrics(object):
         self.atom_decoder = dataset_info['atom_decoder']
         self.dataset_smiles_list = dataset_smiles_list
         self.dataset_info = dataset_info
+        self.use_openbabel = dataset_info.get('use_openbabel', False)
 
         # Retrieve dataset smiles only for qm9 currently.
         if dataset_smiles_list is None and 'qm9' in dataset_info['name']:
             self.dataset_smiles_list = retrieve_qm9_smiles(
                 self.dataset_info)
+        
+        # Initialize OpenBabel metrics if needed
+        if self.use_openbabel:
+            if not openbabel_available:
+                raise ImportError("OpenBabel is required for this dataset but not available")
+            self.ob_metrics = BasicMolecularMetricsOB(dataset_info, dataset_smiles_list)
 
     def compute_validity(self, generated):
         """ generated: list of couples (positions, atom_types)"""
+        if self.use_openbabel:
+            return self.ob_metrics.compute_validity(generated)
+        
         valid = []
 
         for graph in generated:
@@ -101,9 +121,14 @@ class BasicMolecularMetrics(object):
 
     def compute_uniqueness(self, valid):
         """ valid: list of SMILES strings."""
+        if self.use_openbabel:
+            return self.ob_metrics.compute_uniqueness(valid)
         return list(set(valid)), len(set(valid)) / len(valid)
 
     def compute_novelty(self, unique):
+        if self.use_openbabel:
+            return self.ob_metrics.compute_novelty(unique)
+        
         num_novel = 0
         novel = []
         for smiles in unique:
@@ -115,6 +140,9 @@ class BasicMolecularMetrics(object):
     def evaluate(self, generated):
         """ generated: list of pairs (positions: n x 3, atom_types: n [int])
             the positions and atom types should already be masked. """
+        if self.use_openbabel:
+            return self.ob_metrics.evaluate(generated)
+        
         valid, validity = self.compute_validity(generated)
         print(f"Validity over {len(generated)} molecules: {validity * 100 :.2f}%")
         if validity > 0:

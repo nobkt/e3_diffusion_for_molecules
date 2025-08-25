@@ -134,6 +134,49 @@ geom_no_h = {
     'with_h': False}
 
 
+# ASE DB dataset configurations
+ase_db_qm9_with_h = {
+    'name': 'ase_db_qm9',
+    'atom_encoder': {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4},
+    'atom_decoder': ['H', 'C', 'N', 'O', 'F'],
+    'n_nodes': {22: 3393, 17: 13025, 23: 4848, 21: 9970, 19: 13832, 20: 9482, 16: 10644, 13: 3060,
+                15: 7796, 25: 1506, 18: 13364, 12: 1689, 11: 807, 24: 539, 14: 5136, 26: 48, 7: 16, 10: 362,
+                27: 5, 9: 128, 8: 13, 5: 3, 6: 1, 28: 1, 29: 1},
+    'max_n_nodes': 29,
+    'charges_dic': [1, 6, 7, 8, 9],
+    'valencies': [1, 4, 3, 2, 1],
+    'atom_weights': {0: 1, 1: 12, 2: 14, 3: 16, 4: 19},
+    'with_h': True,
+    'use_openbabel': True
+}
+
+ase_db_qm9_without_h = {
+    'name': 'ase_db_qm9',
+    'atom_encoder': {'C': 0, 'N': 1, 'O': 2, 'F': 3},
+    'atom_decoder': ['C', 'N', 'O', 'F'],
+    'max_n_nodes': 29,
+    'n_nodes': {9: 83366, 8: 13625, 7: 2404, 6: 475, 5: 91, 4: 25, 3: 7, 1: 2, 2: 5},
+    'charges_dic': [6, 7, 8, 9],
+    'valencies': [4, 3, 2, 1],
+    'atom_weights': {0: 12, 1: 14, 2: 16, 3: 19},
+    'with_h': False,
+    'use_openbabel': True
+}
+
+# Generic ASE DB dataset configuration
+ase_db_generic = {
+    'name': 'ase_db_generic',
+    'atom_encoder': {'H': 0, 'B': 1, 'C': 2, 'N': 3, 'O': 4, 'F': 5, 'Al': 6, 'Si': 7, 'P': 8, 'S': 9, 'Cl': 10, 'As': 11, 'Br': 12, 'I': 13, 'Hg': 14, 'Bi': 15},
+    'atom_decoder': ['H', 'B', 'C', 'N', 'O', 'F', 'Al', 'Si', 'P', 'S', 'Cl', 'As', 'Br', 'I', 'Hg', 'Bi'],
+    'max_n_nodes': 100,  # Adjustable based on dataset
+    'charges_dic': [1, 5, 6, 7, 8, 9, 13, 14, 15, 16, 17, 33, 35, 53, 80, 83],
+    'valencies': [1, 3, 4, 3, 2, 1, 3, 4, 3, 2, 1, 3, 1, 1, 2, 3],
+    'atom_weights': {0: 1, 1: 11, 2: 12, 3: 14, 4: 16, 5: 19, 6: 27, 7: 28, 8: 31, 9: 32, 10: 35, 11: 75, 12: 80, 13: 127, 14: 201, 15: 209},
+    'with_h': True,
+    'use_openbabel': True
+}
+
+
 def get_dataset_info(dataset_name, remove_h):
     if dataset_name == 'qm9':
         if not remove_h:
@@ -150,5 +193,13 @@ def get_dataset_info(dataset_name, remove_h):
             return qm9_second_half
         else:
             raise Exception('Missing config for %s without hydrogens' % dataset_name)
+    elif dataset_name == 'ase_db_qm9':
+        if not remove_h:
+            return ase_db_qm9_with_h
+        else:
+            return ase_db_qm9_without_h
+    elif dataset_name.startswith('ase_db'):
+        # For generic ASE DB datasets, return generic config
+        return ase_db_generic
     else:
         raise Exception("Wrong dataset %s" % dataset_name)
