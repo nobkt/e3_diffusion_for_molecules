@@ -83,6 +83,38 @@ def setup_args():
                         help='Number of samples for stability analysis')
     
     # Advanced options
+    parser.add_argument('--include_charges', action='store_true', default=True,
+                        help='Include atomic charges in the model')
+    parser.add_argument('--conditioning', type=str, default='',
+                        help='Property conditioning (empty for no conditioning)')
+    parser.add_argument('--context_node_nf', type=int, default=0,
+                        help='Context node features')
+    parser.add_argument('--norm_constant', type=float, default=1.0,
+                        help='Normalization constant')
+    parser.add_argument('--inv_sublayers', type=int, default=2,
+                        help='Number of invariant sublayers')
+    parser.add_argument('--sin_embedding', action='store_true', default=False,
+                        help='Use sinusoidal embedding')
+    parser.add_argument('--normalization_factor', type=float, default=1.0,
+                        help='Normalization factor for dynamics')
+    parser.add_argument('--aggregation_method', type=str, default='sum',
+                        help='Aggregation method for EGNN')
+    parser.add_argument('--augment_noise', type=float, default=0.0,
+                        help='Noise augmentation factor')
+    parser.add_argument('--start_epoch', type=int, default=0,
+                        help='Starting epoch number')
+    parser.add_argument('--data_augmentation', action='store_true', default=False,
+                        help='Use data augmentation')
+    parser.add_argument('--trace', type=str, default='hutch',
+                        help='Trace method')
+    parser.add_argument('--ode_regularization', type=float, default=1e-3,
+                        help='ODE regularization')
+    parser.add_argument('--dequantization', type=str, default='deterministic',
+                        help='Dequantization method')
+    parser.add_argument('--n_report_steps', type=int, default=1,
+                        help='Number of report steps')
+    parser.add_argument('--visualize_every_batch', type=int, default=int(1e8),
+                        help='Visualize every N batches')
     parser.add_argument('--resume', type=str, default=None,
                         help='Path to checkpoint to resume from')
     parser.add_argument('--dp', action='store_true',
@@ -93,6 +125,10 @@ def setup_args():
                         help='Clip gradients')
     parser.add_argument('--break_train_epoch', action='store_true',
                         help='Break training epochs early for debugging')
+    parser.add_argument('--condition_time', action='store_true', default=True,
+                        help='Use time conditioning in diffusion')
+    parser.add_argument('--subtract_thermo', action='store_true', default=False,
+                        help='Subtract thermodynamic quantities')
     
     # Wandb options
     parser.add_argument('--wandb_project', type=str, default='edm_ase',
@@ -132,9 +168,15 @@ def setup_dataset(args, device):
         remove_h = False
         filter_n_atoms = None
         sequential = False
-        device = device
+        # device will be passed to retrieve_dataloaders
     
+    # Set device on config after class creation
     config = Config()
+    config.device = device
+    
+    # Set device on config after class creation
+    config = Config()
+    config.device = device
     
     # Load dataset
     dataloaders, charge_scale = retrieve_dataloaders(config)
@@ -154,8 +196,8 @@ def setup_model_and_optim(args, device, dataset_info, charge_scale):
     """Setup model and optimizer."""
     print("Initializing model...")
     
-    # Get model
-    model, gradnorm_queue = get_model(args, device, dataset_info, charge_scale)
+    # Get model (returns model, nodes_dist, prop_dist)
+    model, nodes_dist, prop_dist = get_model(args, device, dataset_info, charge_scale)
     
     # Get optimizer
     optim = get_optim(args, model)
@@ -166,7 +208,10 @@ def setup_model_and_optim(args, device, dataset_info, charge_scale):
     print(f"  Layers: {args.n_layers}")
     print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
     
-    return model, optim, gradnorm_queue
+    # Initialize gradnorm queue (this might not be needed for ASE)
+    gradnorm_queue = None
+    
+    return model, optim, gradnorm_queue, nodes_dist, prop_dist
 
 
 def setup_distributions(dataset_info):
@@ -385,13 +430,18 @@ def main():
     dataloaders, charge_scale, dataset_info = setup_dataset(args, device)
     
     # Setup model and optimizer
-    model, optim, gradnorm_queue = setup_model_and_optim(args, device, dataset_info, charge_scale)
+    model, optim, gradnorm_queue, nodes_dist, prop_dist = setup_model_and_optim(args, device, dataset_info, charge_scale)
     
-    # Setup distributions
-    nodes_dist, prop_dist = setup_distributions(dataset_info)
+    # Setup distributions (already done in setup_model_and_optim)
+    # nodes_dist, prop_dist = setup_distributions(dataset_info)
     
     # Setup context and normalization
-    property_norms = compute_mean_mad(dataloaders, args.normalize_factors, dataset_info)
+    # For ASE datasets, we don't have the same properties as QM9, so we'll use dummy normalization
+    property_norms = {
+        'coordinates': {'mean': 0.0, 'mad': 1.0},
+        'charges': {'mean': 0.0, 'mad': 1.0},
+        'features': {'mean': 0.0, 'mad': 1.0}
+    }
     
     # Resume from checkpoint if specified
     resume_from_checkpoint(args, model, optim)
