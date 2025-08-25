@@ -4,6 +4,13 @@ try:
     use_rdkit = True
 except ModuleNotFoundError:
     use_rdkit = False
+    
+# Import OpenBabel as fallback
+try:
+    from qm9.openbabel_functions import OpenBabelMolecularMetrics
+    use_openbabel = True
+except ModuleNotFoundError:
+    use_openbabel = False
 import qm9.dataset as dataset
 import torch
 import matplotlib
@@ -367,6 +374,10 @@ def analyze_stability_for_molecules(molecule_list, dataset_info):
         rdkit_metrics = metrics.evaluate(processed_list)
         #print("Unique molecules:", rdkit_metrics[1])
         return validity_dict, rdkit_metrics
+    elif use_openbabel:
+        metrics = OpenBabelMolecularMetrics(dataset_info)
+        openbabel_metrics = metrics.evaluate(processed_list)
+        return validity_dict, openbabel_metrics
     else:
         return validity_dict, None
 

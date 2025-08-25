@@ -2,6 +2,7 @@ from torch.utils.data import DataLoader
 from qm9.data.args import init_argparse
 from qm9.data.collate import PreprocessQM9
 from qm9.data.utils import initialize_datasets
+from qm9.ase_database import ASEDatabaseReader
 import os
 
 
@@ -35,6 +36,9 @@ def retrieve_dataloaders(cfg):
                                          num_workers=num_workers,
                                          collate_fn=preprocess.collate_fn)
                              for split, dataset in datasets.items()}
+    elif 'ase' in cfg.dataset or hasattr(cfg, 'ase_db_path'):
+        # ASE database handling
+        return retrieve_ase_dataloaders(cfg)
     elif 'geom' in cfg.dataset:
         import build_geom_dataset
         from configs.datasets_config import get_dataset_info
@@ -79,3 +83,76 @@ def filter_atoms(datasets, n_nodes):
         datasets[key].num_pts = dataset.data['one_hot'].size(0)
         datasets[key].perm = None
     return datasets
+
+
+def retrieve_ase_dataloaders(cfg):
+    """
+    Retrieve dataloaders for ASE database.
+    
+    Args:
+        cfg: Configuration object with ASE database settings
+        
+    Returns:
+        Tuple of (dataloaders, charge_scale)
+    """
+    from qm9.data.dataset_class import ProcessedDataset
+    
+    # Get ASE database path
+    if hasattr(cfg, 'ase_db_path'):
+        db_path = cfg.ase_db_path
+    else:
+        # Try to construct from dataset name
+        db_path = os.path.join(cfg.datadir, f"{cfg.dataset}.db")
+    
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"ASE database not found at {db_path}")
+    
+    # Initialize ASE reader
+    ase_reader = ASEDatabaseReader(db_path)
+    
+    # Get dataset info
+    dataset_info = ase_reader.get_dataset_info(
+        dataset_name=cfg.dataset,
+        with_h=not cfg.remove_h
+    )
+    
+    # Create splits
+    data_splits = ase_reader.create_splits(
+        train_ratio=getattr(cfg, 'train_ratio', 0.8),
+        valid_ratio=getattr(cfg, 'valid_ratio', 0.1),
+        test_ratio=getattr(cfg, 'test_ratio', 0.1),
+        random_seed=getattr(cfg, 'random_seed', 42)
+    )
+    
+    # Convert to ProcessedDataset format
+    datasets = {}
+    for split_name, split_data in data_splits.items():
+        datasets[split_name] = ProcessedDataset(
+            split_data, 
+            num_pts=-1,  # Use all data
+            included_species=None,  # Will be determined automatically
+            subtract_thermo=False
+        )
+    
+    # Filter by number of atoms if specified
+    if hasattr(cfg, 'filter_n_atoms') and cfg.filter_n_atoms is not None:
+        print("Retrieving molecules with only %d atoms" % cfg.filter_n_atoms)
+        datasets = filter_atoms(datasets, cfg.filter_n_atoms)
+    
+    # Create dataloaders
+    preprocess = PreprocessQM9(load_charges=cfg.include_charges)
+    dataloaders = {
+        split: DataLoader(
+            dataset,
+            batch_size=cfg.batch_size,
+            shuffle=(split == 'train'),
+            num_workers=getattr(cfg, 'num_workers', 0),
+            collate_fn=preprocess.collate_fn
+        )
+        for split, dataset in datasets.items()
+    }
+    
+    # No charge scaling for ASE databases by default
+    charge_scale = None
+    
+    return dataloaders, charge_scale
