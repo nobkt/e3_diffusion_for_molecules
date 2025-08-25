@@ -132,7 +132,8 @@ class ASEDBDataset(Dataset):
                     if isinstance(prop_value, (list, np.ndarray)):
                         prop_value = torch.tensor(prop_value, dtype=torch.float32)
                     else:
-                        prop_value = torch.tensor([float(prop_value)], dtype=torch.float32)
+                        # Store as scalar tensor (0-dimensional)
+                        prop_value = torch.tensor(float(prop_value), dtype=torch.float32)
                     data[prop].append(prop_value)
             
             valid_molecules.append(i)
@@ -166,7 +167,10 @@ class ASEDBDataset(Dataset):
             # Stack other properties
             for prop in property_keys:
                 if prop in data and len(data[prop]) > 0:
-                    data[prop] = torch.stack(data[prop])
+                    if data[prop][0].dim() == 0:  # Scalar values
+                        data[prop] = torch.stack(data[prop])
+                    else:  # Multi-dimensional values
+                        data[prop] = torch.stack(data[prop])
         
         return data
     

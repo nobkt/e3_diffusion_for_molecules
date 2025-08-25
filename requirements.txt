@@ -5,3 +5,6 @@ torch
 torchvision
 tqdm
 wandb
+ase
+openbabel-wheel
+rdkit

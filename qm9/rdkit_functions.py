@@ -91,7 +91,7 @@ class BasicMolecularMetrics(object):
         self.use_openbabel = dataset_info.get('use_openbabel', False)
 
         # Retrieve dataset smiles only for qm9 currently.
-        if dataset_smiles_list is None and 'qm9' in dataset_info['name']:
+        if dataset_smiles_list is None and 'qm9' in dataset_info['name'] and not dataset_info.get('use_openbabel', False):
             self.dataset_smiles_list = retrieve_qm9_smiles(
                 self.dataset_info)
         
