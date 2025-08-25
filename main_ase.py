@@ -134,6 +134,8 @@ def create_ase_parser():
     parser.add_argument('--test_epochs', type=int, default=1)
     parser.add_argument('--data_augmentation', type=eval, default=False, help="Data augmentation")
     parser.add_argument('--normalize_factors', type=eval, default=[1, 4, 1], help="normalize factors")
+    parser.add_argument('--visualize_every_batch', type=int, default=1e8,
+                        help="Can be used to visualize multiple times per epoch")
     
     # Add missing arguments for EGNN model
     parser.add_argument('--normalization_factor', type=float, default=1,
