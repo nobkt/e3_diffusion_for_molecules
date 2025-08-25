@@ -209,6 +209,62 @@ def test_adaptive_normalization():
         traceback.print_exc()
         return False
 
+def test_ase_unit_conversion_fix():
+    """Test that ASE dataset unit conversion doesn't cause repeated applications."""
+    print("Testing ASE unit conversion fix...")
+    
+    try:
+        import build_ase_dataset
+        import tempfile
+        import ase.db
+        import ase
+        
+        # Create a test database
+        db_path = tempfile.mktemp(suffix='.db')
+        
+        with ase.db.connect(db_path) as db:
+            atoms = ase.Atoms(symbols=['C', 'H', 'H', 'H'], 
+                             positions=[[0, 0, 0], [1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]])
+            db.write(atoms, U0_Ha=-40.5, HOMO_Ha=-0.25, ZPVE_Ha=0.05)
+        
+        try:
+            # Load data and create dataset
+            data_list = build_ase_dataset.load_ase_data(db_path, max_entries=1)
+            dataset = build_ase_dataset.ASEDataset(data_list)
+            
+            # Check initial value
+            initial_u0 = dataset.properties[0]['U0_Ha']
+            print(f"  Initial U0_Ha: {initial_u0}")
+            
+            # Apply conversion once
+            qm9_to_eV = {'U0': 27.2114}
+            dataset.convert_units(qm9_to_eV)
+            
+            after_first = dataset.properties[0]['U0_Ha']
+            print(f"  After 1st conversion: {after_first:.2f}")
+            
+            # Try to apply again (should be prevented)
+            dataset.convert_units(qm9_to_eV)
+            
+            after_second = dataset.properties[0]['U0_Ha']
+            print(f"  After 2nd conversion: {after_second:.2f}")
+            
+            # Values should be the same (no double conversion)
+            if abs(after_first - after_second) < 0.01:
+                print(f"  ✅ Unit conversion fix working - prevents double conversion")
+                return True
+            else:
+                print(f"  ❌ Unit conversion still allowing multiple applications")
+                return False
+                
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+                
+    except Exception as e:
+        print(f"  ❌ ASE unit conversion test failed: {e}")
+        return False
+
 def main():
     """Run all regression tests."""
     print("=" * 60)
@@ -228,10 +284,21 @@ def main():
         all_tests_passed = False
     
     print()
+    
+    # Test 3: ASE unit conversion fix
+    if not test_ase_unit_conversion_fix():
+        all_tests_passed = False
+    
+    print()
     print("=" * 60)
     if all_tests_passed:
         print("✅ ALL REGRESSION TESTS PASSED")
         print("The high loss value bugs have been successfully fixed!")
+        print()
+        print("If you're still experiencing high loss with your custom ASE dataset:")
+        print("1. Check that your property values are in realistic ranges for QM9-like molecules")
+        print("2. Verify your Hartree units are correct before conversion")
+        print("3. Use the ASE database validation tool: python build_ase_dataset.py --validate --db_file your_db.db")
     else:
         print("❌ SOME REGRESSION TESTS FAILED")
         print("There may be remaining issues with the high loss value fixes.")

@@ -412,6 +412,10 @@ class ASEDataset(Dataset):
         
         # Store all molecular properties for unit conversion
         self.properties = [mol['properties'] for mol in self.data_list]
+        
+        # Track whether unit conversion has been applied to prevent multiple applications
+        self._units_converted = False
+        self._converted_properties = set()
 
     def convert_units(self, units_dict):
         """
@@ -422,6 +426,14 @@ class ASEDataset(Dataset):
         units_dict : dict
             Dictionary mapping property names to conversion factors
         """
+        # Prevent multiple applications of unit conversion
+        if self._units_converted:
+            print(f"Warning: Unit conversion already applied to this dataset. Skipping to prevent double conversion.")
+            return
+        
+        # Track which properties we actually convert
+        converted_count = 0
+        
         for mol_props in self.properties:
             for prop_name, conversion_factor in units_dict.items():
                 # Handle different possible property key formats
@@ -445,7 +457,13 @@ class ASEDataset(Dataset):
                 for key in property_keys:
                     if key in mol_props and isinstance(mol_props[key], (int, float)):
                         mol_props[key] = float(mol_props[key]) * conversion_factor
-                        print(f"Converted {key}: original * {conversion_factor}")
+                        converted_count += 1
+                        self._converted_properties.add(key)
+        
+        # Mark conversion as complete and log summary
+        self._units_converted = True
+        if converted_count > 0:
+            print(f"Converted {converted_count} property values using conversion factors: {list(self._converted_properties)}")
 
     def __len__(self):
         return len(self.data_list)
