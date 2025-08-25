@@ -35,6 +35,17 @@ def retrieve_dataloaders(cfg):
                                          num_workers=num_workers,
                                          collate_fn=preprocess.collate_fn)
                              for split, dataset in datasets.items()}
+    elif 'ase' in cfg.dataset:
+        # Handle ASE database datasets
+        from qm9.ase_dataset import load_ase_dataset
+        
+        # Get database path
+        db_path = getattr(cfg, 'ase_db_path', './data/molecules.db')
+        
+        if not os.path.exists(db_path):
+            raise FileNotFoundError(f"ASE database not found at {db_path}")
+        
+        dataloaders, charge_scale = load_ase_dataset(db_path, cfg)
     elif 'geom' in cfg.dataset:
         import build_geom_dataset
         from configs.datasets_config import get_dataset_info

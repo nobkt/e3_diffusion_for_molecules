@@ -150,5 +150,28 @@ def get_dataset_info(dataset_name, remove_h):
             return qm9_second_half
         else:
             raise Exception('Missing config for %s without hydrogens' % dataset_name)
+    elif 'ase' in dataset_name:
+        # For ASE datasets, return a generic template
+        # The actual config will be generated dynamically based on the database content
+        return get_ase_template_config(dataset_name, remove_h)
     else:
         raise Exception("Wrong dataset %s" % dataset_name)
+
+
+def get_ase_template_config(dataset_name, remove_h):
+    """
+    Get a template configuration for ASE datasets.
+    This will be populated with actual values when the dataset is loaded.
+    """
+    return {
+        'name': dataset_name,
+        'atom_encoder': {},  # Will be populated based on database content
+        'atom_decoder': [],  # Will be populated based on database content
+        'max_n_nodes': 100,  # Default, can be overridden
+        'n_nodes': {},  # Will be populated based on database content
+        'atom_types': {},  # Will be populated based on database content
+        'colors_dic': [],  # Will be populated based on atom types
+        'radius_dic': [],  # Will be populated based on atom types
+        'with_h': not remove_h,
+        'is_ase': True  # Flag to identify ASE datasets
+    }

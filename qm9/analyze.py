@@ -4,6 +4,13 @@ try:
     use_rdkit = True
 except ModuleNotFoundError:
     use_rdkit = False
+
+# Try to import OpenBabel functions as fallback
+try:
+    from qm9.openbabel_functions import BasicMolecularMetricsOB
+    use_openbabel = True
+except ImportError:
+    use_openbabel = False
 import qm9.dataset as dataset
 import torch
 import matplotlib
@@ -228,17 +235,33 @@ def check_stability(positions, atom_type, dataset_info, debug=False):
             elif dataset_info['name'] == 'geom':
                 order = bond_analyze.geom_predictor(
                     (atom_decoder[pair[0]], atom_decoder[pair[1]]), dist)
+            elif 'ase' in dataset_info['name'] or dataset_info.get('is_ase', False):
+                # For ASE datasets, use the general bond order prediction from OpenBabel functions
+                from qm9.openbabel_functions import predict_bond_order_general
+                order = predict_bond_order_general(atom1, atom2, dist)
+            else:
+                # Default fallback for unknown datasets
+                from qm9.openbabel_functions import predict_bond_order_general
+                order = predict_bond_order_general(atom1, atom2, dist)
             nr_bonds[i] += order
             nr_bonds[j] += order
     nr_stable_bonds = 0
     for atom_type_i, nr_bonds_i in zip(atom_type, nr_bonds):
-        possible_bonds = bond_analyze.allowed_bonds[atom_decoder[atom_type_i]]
+        atom_symbol = atom_decoder[atom_type_i]
+        
+        # Get allowed bonds, use a default if not found
+        if atom_symbol in bond_analyze.allowed_bonds:
+            possible_bonds = bond_analyze.allowed_bonds[atom_symbol]
+        else:
+            # For unknown elements, assume they can have 1-4 bonds (common range)
+            possible_bonds = [1, 2, 3, 4]
+            
         if type(possible_bonds) == int:
             is_stable = possible_bonds == nr_bonds_i
         else:
             is_stable = nr_bonds_i in possible_bonds
         if not is_stable and debug:
-            print("Invalid bonds for molecule %s with %d bonds" % (atom_decoder[atom_type_i], nr_bonds_i))
+            print("Invalid bonds for molecule %s with %d bonds" % (atom_symbol, nr_bonds_i))
         nr_stable_bonds += int(is_stable)
 
     molecule_stable = nr_stable_bonds == len(x)
@@ -282,6 +305,9 @@ def main_check_stability(remove_h: bool, batch_size=32):
     if use_rdkit:
         from qm9.rdkit_functions import BasicMolecularMetrics
         metrics = BasicMolecularMetrics(dataset_info)
+    elif use_openbabel:
+        from qm9.openbabel_functions import BasicMolecularMetricsOB
+        metrics = BasicMolecularMetricsOB(dataset_info)
 
     atom_decoder = dataset_info['atom_decoder']
 
@@ -312,6 +338,11 @@ def main_check_stability(remove_h: bool, batch_size=32):
         print('For test')
         metrics.evaluate(test_loader)
         print('For train')
+        metrics.evaluate(train_loader)
+    elif use_openbabel:
+        print('For test (using OpenBabel)')
+        metrics.evaluate(test_loader)
+        print('For train (using OpenBabel)')
         metrics.evaluate(train_loader)
     else:
         print('For train')
@@ -367,6 +398,10 @@ def analyze_stability_for_molecules(molecule_list, dataset_info):
         rdkit_metrics = metrics.evaluate(processed_list)
         #print("Unique molecules:", rdkit_metrics[1])
         return validity_dict, rdkit_metrics
+    elif use_openbabel:
+        metrics = BasicMolecularMetricsOB(dataset_info)
+        ob_metrics = metrics.evaluate(processed_list)
+        return validity_dict, ob_metrics
     else:
         return validity_dict, None
 

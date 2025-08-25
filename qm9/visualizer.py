@@ -138,8 +138,16 @@ def plot_molecule(ax, positions, atom_type, alpha, spheres_3d, hex_bg_color,
                 draw_edge_int = bond_analyze.geom_predictor(pair, dist)
                 # Draw edge outputs 1 / -1 value, convert to True / False.
                 line_width = 2
+            elif 'ase' in dataset_info['name'] or dataset_info.get('is_ase', False):
+                # For ASE datasets, use general bond order prediction
+                from qm9.openbabel_functions import predict_bond_order_general
+                draw_edge_int = predict_bond_order_general(atom1, atom2, dist)
+                line_width = 2
             else:
-                raise Exception('Wrong dataset_info name')
+                # Default fallback for unknown datasets
+                from qm9.openbabel_functions import predict_bond_order_general
+                draw_edge_int = predict_bond_order_general(atom1, atom2, dist)
+                line_width = 2
             draw_edge = draw_edge_int > 0
             if draw_edge:
                 if draw_edge_int == 4:
