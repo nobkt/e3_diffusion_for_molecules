@@ -57,8 +57,11 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
         n_nodes = 19
     elif args.dataset == 'geom':
         n_nodes = 44
+    elif 'ase' in args.dataset:
+        # For ASE datasets, use the maximum number of nodes from dataset_info
+        n_nodes = dataset_info['max_n_nodes']
     else:
-        raise ValueError()
+        raise ValueError(f"Unknown dataset type: {args.dataset}")
 
     # TODO FIX: This conditioning just zeros.
     if args.context_node_nf > 0:

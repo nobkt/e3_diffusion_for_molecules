@@ -140,6 +140,10 @@ def setup_args():
     parser.add_argument('--online', type=bool, default=True,
                         help='True = wandb online -- False = wandb offline')
     
+    # Dataset specification for compatibility with sampling functions
+    parser.add_argument('--dataset', type=str, default='ase_custom',
+                        help='Dataset type (for ASE databases, use ase_custom)')
+    
     return parser.parse_args()
 
 
