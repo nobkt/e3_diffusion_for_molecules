@@ -217,8 +217,8 @@ def main_ase():
     args.models_path = args.main_path + '/models/'
     args.summaries_path = args.main_path + '/summaries/'
     
-    if not utils.check_mask_correct(vars(args), device):
-        raise utils.FoundNaNException("Something wrong with the mask")
+    # Create necessary folders
+    utils.create_folders(args)
 
     # Initialize wandb if user provided
     if args.wandb_usr and wandb is not None:
