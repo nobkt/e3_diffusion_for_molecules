@@ -237,11 +237,19 @@ def build_molecule_openbabel(positions, atom_types, dataset_info):
             if atom_type == 0:  # Skip padding
                 continue
                 
-            if atom_type not in atom_decoder:
-                logging.warning(f"Unknown atom type: {atom_type}")
-                continue
-                
-            symbol = atom_decoder[atom_type]
+            # Handle different atom type formats
+            atom_type_val = atom_type.item() if hasattr(atom_type, 'item') else atom_type
+            
+            if atom_type_val in atom_decoder:
+                # atom_type is an index into atom_decoder
+                symbol = atom_decoder[atom_type_val]
+            elif isinstance(atom_type_val, int) and atom_type_val < len(atom_decoder):
+                # atom_type is an index
+                symbol = atom_decoder[atom_type_val]  
+            else:
+                # Assume atom_type is atomic number, convert to symbol
+                atomic_to_symbol = {1: 'H', 6: 'C', 7: 'N', 8: 'O', 9: 'F'}
+                symbol = atomic_to_symbol.get(atom_type_val, 'C')
             
             # Create atom
             atom = mol.NewAtom()
@@ -348,19 +356,31 @@ def build_xae_molecule_openbabel(positions, atom_types, dataset_info):
                 continue
                 
             # Get bond order based on atom types and distance
-            atom_pair = sorted([atom_types[i].item(), atom_types[j].item()])
+            if atom_types[i] == 0 or atom_types[j] == 0:  # Skip padding
+                continue
+                
+            # Convert indices to atomic numbers if needed
+            if isinstance(atom_types[i].item(), int) and atom_types[i].item() < len(atom_decoder):
+                # atom_types contains indices into atom_decoder
+                atom_i = atom_decoder[atom_types[i].item()]
+                atom_j = atom_decoder[atom_types[j].item()]
+            else:
+                # atom_types contains atomic numbers directly
+                atomic_to_symbol = {1: 'H', 6: 'C', 7: 'N', 8: 'O', 9: 'F'}
+                atom_i = atomic_to_symbol.get(atom_types[i].item(), 'C')
+                atom_j = atomic_to_symbol.get(atom_types[j].item(), 'C')
             
             if BOND_ANALYSIS_AVAILABLE:
                 if dataset_info['name'] in ['qm9', 'qm9_second_half', 'qm9_first_half']:
-                    order = get_bond_order(atom_decoder[atom_pair[0]], atom_decoder[atom_pair[1]], dists[i, j].item())
+                    order = get_bond_order(atom_i, atom_j, dists[i, j].item())
                 elif dataset_info['name'] == 'geom':
-                    order = geom_predictor((atom_decoder[atom_pair[0]], atom_decoder[atom_pair[1]]), dists[i, j].item(), limit_bonds_to_one=True)
+                    order = geom_predictor((atom_i, atom_j), dists[i, j].item(), limit_bonds_to_one=True)
                 else:
                     # Default bond order prediction based on distance
-                    order = _predict_bond_order_distance(atom_decoder[atom_pair[0]], atom_decoder[atom_pair[1]], dists[i, j].item())
+                    order = _predict_bond_order_distance(atom_i, atom_j, dists[i, j].item())
             else:
                 # Use distance-based bond order prediction as fallback
-                order = _predict_bond_order_distance(atom_decoder[atom_pair[0]], atom_decoder[atom_pair[1]], dists[i, j].item())
+                order = _predict_bond_order_distance(atom_i, atom_j, dists[i, j].item())
             
             if order > 0:
                 # Set symmetric adjacency and edge information
