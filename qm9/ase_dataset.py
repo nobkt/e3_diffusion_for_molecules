@@ -45,10 +45,6 @@ def get_ase_dataset_info(db_path: str, max_atoms: int = 100, name: str = "ase_ge
             
         atom_types.update(symbols)
         num_atoms_list.append(len(symbols))
-        
-        # Limit analysis to first 1000 entries for speed
-        if i >= 1000:
-            break
     
     # Sort atom types for consistent encoding
     atom_types = sorted(list(atom_types))

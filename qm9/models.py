@@ -89,7 +89,18 @@ class DistributionNodes:
     def log_prob(self, batch_n_nodes):
         assert len(batch_n_nodes.size()) == 1
 
-        idcs = [self.keys[i.item()] for i in batch_n_nodes]
+        # Handle missing keys gracefully by assigning minimum probability
+        idcs = []
+        for i in batch_n_nodes:
+            n_nodes = i.item()
+            if n_nodes in self.keys:
+                idcs.append(self.keys[n_nodes])
+            else:
+                # For unseen node counts, assign the index of minimum probability
+                min_prob_idx = torch.argmin(self.prob).item()
+                idcs.append(min_prob_idx)
+                print(f"Warning: Node count {n_nodes} not seen in training data, using minimum probability")
+        
         idcs = torch.tensor(idcs).to(batch_n_nodes.device)
 
         log_p = torch.log(self.prob + 1e-30)
