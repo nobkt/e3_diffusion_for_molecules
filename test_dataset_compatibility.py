@@ -135,7 +135,7 @@ def test_dataloader_consistency():
         # Validate batch structure
         batch = batches[0]
         required_keys = ['positions', 'one_hot', 'charges', 'atom_mask', 'edge_mask']
-        property_keys = ['U0_Ha', 'HOMO_Ha', 'LUMO_Ha', 'gap_Ha', 'alpha']
+        property_keys = ['U0', 'HOMO', 'LUMO', 'gap', 'alpha']  # Updated to QM9 format
         
         # Check required geometric keys
         for key in required_keys:
@@ -190,17 +190,17 @@ def test_dataloader_consistency():
                     return False
         
         # Validate unit conversion by checking reasonable value ranges
-        # U0_Ha should be in eV after conversion (negative values around -1000 to -4000 eV for small molecules)
-        if 'U0_Ha' in batch:
-            u0_values = batch['U0_Ha']
+        # U0 should be in eV after conversion (negative values around -1000 to -4000 eV for small molecules)
+        if 'U0' in batch:
+            u0_values = batch['U0']
             if not torch.all((u0_values < 0) & (u0_values > -10000)):
-                print(f"✗ U0_Ha values seem unconverted or unreasonable: {u0_values}")
+                print(f"✗ U0 values seem unconverted or unreasonable: {u0_values}")
                 return False
         
         # HOMO/LUMO should be in eV (HOMO negative, LUMO could be positive)
-        if 'HOMO_Ha' in batch and 'LUMO_Ha' in batch:
-            homo_values = batch['HOMO_Ha']
-            lumo_values = batch['LUMO_Ha']
+        if 'HOMO' in batch and 'LUMO' in batch:
+            homo_values = batch['HOMO']
+            lumo_values = batch['LUMO']
             if not torch.all(homo_values < 0):
                 print(f"✗ HOMO values should be negative: {homo_values}")
                 return False
@@ -208,7 +208,7 @@ def test_dataloader_consistency():
         print("✓ All dataloader consistency tests passed")
         print(f"✓ Batch size: {batch_size}, Max nodes: {n_nodes}")
         print(f"✓ Charge scale: {charge_scale}")
-        print(f"✓ Sample U0_Ha values (eV): {batch['U0_Ha'][:min(3, batch_size)]}")
+        print(f"✓ Sample U0 values (eV): {batch['U0'][:min(3, batch_size)]}")
         
         return True
         
@@ -250,18 +250,18 @@ def test_property_scaling():
         # Original U0_Ha: -40.47893 Ha -> should become -40.47893 * 27.2114 = -1101.6 eV
         # Original ZPVE_Ha: 0.044749 Ha -> should become 0.044749 * 27211.4 = 1217.8 cm⁻¹
         
-        if 'U0_Ha' in batch:
-            u0_val = batch['U0_Ha'][0].item()
+        if 'U0' in batch:
+            u0_val = batch['U0'][0].item()
             expected_range = (-3000, -500)  # Broader range for small molecules in eV
             if not (expected_range[0] < u0_val < expected_range[1]):
-                print(f"✗ U0_Ha value {u0_val} not in expected range {expected_range}")
+                print(f"✗ U0 value {u0_val} not in expected range {expected_range}")
                 return False
         
-        if 'ZPVE_Ha' in batch:
-            zpve_val = batch['ZPVE_Ha'][0].item()
+        if 'zpve' in batch:
+            zpve_val = batch['zpve'][0].item()
             expected_range = (400, 2000)  # Broader range for ZPVE in cm⁻¹ for small molecules
             if not (expected_range[0] < zpve_val < expected_range[1]):
-                print(f"✗ ZPVE_Ha value {zpve_val} not in expected range {expected_range}")
+                print(f"✗ zpve value {zpve_val} not in expected range {expected_range}")
                 return False
         
         print("✓ Property scaling tests passed")
