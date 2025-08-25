@@ -29,12 +29,14 @@ def remove_mean(x):
 
 
 def remove_mean_with_mask(x, node_mask):
-    masked_max_abs_value = (x * (1 - node_mask)).abs().sum().item()
+    # Convert boolean mask to float for arithmetic operations
+    node_mask_float = node_mask.float()
+    masked_max_abs_value = (x * (1.0 - node_mask_float)).abs().sum().item()
     assert masked_max_abs_value < 1e-5, f'Error {masked_max_abs_value} too high'
-    N = node_mask.sum(1, keepdims=True)
+    N = node_mask_float.sum(1, keepdims=True)
 
     mean = torch.sum(x, dim=1, keepdim=True) / N
-    x = x - mean * node_mask
+    x = x - mean * node_mask_float
     return x
 
 
@@ -52,7 +54,9 @@ def assert_mean_zero_with_mask(x, node_mask, eps=1e-10):
 
 
 def assert_correctly_masked(variable, node_mask):
-    assert (variable * (1 - node_mask)).abs().max().item() < 1e-4, \
+    # Convert boolean mask to float for arithmetic operations
+    node_mask_float = node_mask.float()
+    assert (variable * (1.0 - node_mask_float)).abs().max().item() < 1e-4, \
         'Variables not masked properly.'
 
 
