@@ -43,6 +43,9 @@ def get_model(args, device, dataset_info, dataloader_train):
             include_charges=args.include_charges
             )
 
+        # Move model to specified device
+        vdm = vdm.to(device)
+
         return vdm, nodes_dist, prop_dist
 
     else:
