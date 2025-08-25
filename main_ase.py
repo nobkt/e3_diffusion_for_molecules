@@ -133,8 +133,12 @@ def setup_args():
     # Wandb options
     parser.add_argument('--wandb_project', type=str, default='edm_ase',
                         help='Wandb project name')
+    parser.add_argument('--wandb_usr', type=str, default=None,
+                        help='Wandb username/entity')
     parser.add_argument('--no_wandb', action='store_true',
                         help='Disable wandb logging')
+    parser.add_argument('--online', type=bool, default=True,
+                        help='True = wandb online -- False = wandb offline')
     
     return parser.parse_args()
 
@@ -254,15 +258,29 @@ def setup_output_dir(args):
 
 def setup_wandb(args):
     """Setup Weights & Biases logging."""
-    if not args.no_wandb:
-        wandb.init(
-            project=args.wandb_project,
-            name=args.exp_name,
-            config=vars(args)
-        )
-        print("Wandb logging enabled")
+    if args.no_wandb:
+        mode = 'disabled'
     else:
+        mode = 'online' if args.online else 'offline'
+    
+    # Import utils to get wandb username
+    import utils
+    wandb_usr = utils.get_wandb_username(args.wandb_usr)
+    
+    wandb.init(
+        entity=wandb_usr,
+        project=args.wandb_project,
+        name=args.exp_name,
+        config=vars(args),
+        mode=mode,
+        settings=wandb.Settings(_disable_stats=True),
+        reinit=True
+    )
+    
+    if args.no_wandb:
         print("Wandb logging disabled")
+    else:
+        print("Wandb logging enabled")
 
 
 def resume_from_checkpoint(args, model, optim):
