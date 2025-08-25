@@ -255,7 +255,7 @@ def initialize_ase_datasets(args, db_path, max_molecules=None, include_propertie
             dataset['num_atoms'] = torch.sum(dataset['charges'] > 0, dim=1)
 
     # Get a list of all species across the entire dataset
-    all_species = _get_species(datasets_dict, ignore_check=False)
+    all_species = _get_species(datasets_dict, ignore_check=True)  # Ignore check for ASE datasets
 
     # Now initialize MolecularDataset based upon loaded data
     datasets = {split: ProcessedDataset(data, num_pts=num_pts.get(
