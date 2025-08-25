@@ -96,12 +96,17 @@ class OpenBabelMolecularMetrics:
                 distance = dists[i, j]
                 
                 # Use existing bond analysis functions
-                if dataset_info['name'] in ['qm9', 'qm9_second_half', 'qm9_first_half']:
-                    bond_order = get_bond_order(atom1_symbol, atom2_symbol, distance)
-                elif dataset_info['name'] == 'geom':
-                    bond_order = geom_predictor((atom1_symbol, atom2_symbol), distance, limit_bonds_to_one=True)
-                else:
-                    # Generic distance-based bonding
+                bond_order = 0  # Initialize
+                try:
+                    if dataset_info['name'] in ['qm9', 'qm9_second_half', 'qm9_first_half']:
+                        bond_order = get_bond_order(atom1_symbol, atom2_symbol, distance)
+                    elif dataset_info['name'] == 'geom':
+                        bond_order = geom_predictor((atom1_symbol, atom2_symbol), distance, limit_bonds_to_one=True)
+                    else:
+                        # Generic distance-based bonding
+                        bond_order = self._generic_bond_order(atom1_symbol, atom2_symbol, distance)
+                except Exception:
+                    # If bond order calculation fails, use generic method
                     bond_order = self._generic_bond_order(atom1_symbol, atom2_symbol, distance)
                     
                 if bond_order > 0:
@@ -167,11 +172,16 @@ class OpenBabelMolecularMetrics:
                 distance = dists[i, j]
                 
                 # Determine bond order
-                if dataset_info['name'] in ['qm9', 'qm9_second_half', 'qm9_first_half']:
-                    order = get_bond_order(atom1_symbol, atom2_symbol, distance)
-                elif dataset_info['name'] == 'geom':
-                    order = geom_predictor((atom1_symbol, atom2_symbol), distance, limit_bonds_to_one=True)
-                else:
+                order = 0  # Initialize to 0
+                try:
+                    if dataset_info['name'] in ['qm9', 'qm9_second_half', 'qm9_first_half']:
+                        order = get_bond_order(atom1_symbol, atom2_symbol, distance)
+                    elif dataset_info['name'] == 'geom':
+                        order = geom_predictor((atom1_symbol, atom2_symbol), distance, limit_bonds_to_one=True)
+                    else:
+                        order = self._generic_bond_order(atom1_symbol, atom2_symbol, distance)
+                except Exception:
+                    # If bond order calculation fails, use generic method
                     order = self._generic_bond_order(atom1_symbol, atom2_symbol, distance)
                     
                 if order > 0:

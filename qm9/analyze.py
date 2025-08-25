@@ -21,6 +21,23 @@ import scipy.stats as sp_stats
 from qm9 import bond_analyze
 
 
+def _generic_bond_order_simple(atom1, atom2, distance):
+    """Simple distance-based bond order for non-QM9/geom datasets."""
+    # Simple covalent radii (approximate)
+    covalent_radii = {
+        'H': 0.31, 'C': 0.76, 'N': 0.71, 'O': 0.66, 'F': 0.57,
+        'P': 1.07, 'S': 1.05, 'Cl': 0.99, 'Br': 1.20, 'I': 1.39
+    }
+    
+    r1 = covalent_radii.get(atom1, 0.77)
+    r2 = covalent_radii.get(atom2, 0.77)
+    bond_threshold = (r1 + r2) * 1.3
+    
+    if distance < bond_threshold:
+        return 1  # Simple single bond
+    return 0
+
+
 # 'atom_decoder': ['H', 'B', 'C', 'N', 'O', 'F', 'Al', 'Si', 'P', 'S', 'Cl', 'As', 'Br', 'I', 'Hg', 'Bi'],
 
 analyzed_19 ={'atom_types': {1: 93818, 3: 21212, 0: 139496, 2: 8251, 4: 26},
@@ -230,11 +247,19 @@ def check_stability(positions, atom_type, dataset_info, debug=False):
             dist = np.sqrt(np.sum((p1 - p2) ** 2))
             atom1, atom2 = atom_decoder[atom_type[i]], atom_decoder[atom_type[j]]
             pair = sorted([atom_type[i], atom_type[j]])
-            if dataset_info['name'] == 'qm9' or dataset_info['name'] == 'qm9_second_half' or dataset_info['name'] == 'qm9_first_half':
-                order = bond_analyze.get_bond_order(atom1, atom2, dist)
-            elif dataset_info['name'] == 'geom':
-                order = bond_analyze.geom_predictor(
-                    (atom_decoder[pair[0]], atom_decoder[pair[1]]), dist)
+            order = 0  # Initialize order
+            try:
+                if dataset_info['name'] == 'qm9' or dataset_info['name'] == 'qm9_second_half' or dataset_info['name'] == 'qm9_first_half':
+                    order = bond_analyze.get_bond_order(atom1, atom2, dist)
+                elif dataset_info['name'] == 'geom':
+                    order = bond_analyze.geom_predictor(
+                        (atom_decoder[pair[0]], atom_decoder[pair[1]]), dist)
+                else:
+                    # For other datasets, use a simple distance-based approach
+                    order = _generic_bond_order_simple(atom1, atom2, dist)
+            except Exception:
+                # Fallback to simple distance-based bonding
+                order = _generic_bond_order_simple(atom1, atom2, dist)
             nr_bonds[i] += order
             nr_bonds[j] += order
     nr_stable_bonds = 0
@@ -346,7 +371,11 @@ def analyze_stability_for_molecules(molecule_list, dataset_info):
     processed_list = []
 
     for i in range(n_samples):
-        atom_type = one_hot[i].argmax(1).cpu().detach()
+        if one_hot[i].dtype == torch.bool:
+            # Convert boolean one_hot to float and then get argmax
+            atom_type = one_hot[i].float().argmax(1).cpu().detach()
+        else:
+            atom_type = one_hot[i].argmax(1).cpu().detach()
         pos = x[i].cpu().detach()
 
         atom_type = atom_type[0:int(atomsxmol[i])]
