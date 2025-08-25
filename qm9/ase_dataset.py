@@ -255,6 +255,10 @@ class ASEDataLoader:
         charges = torch.stack([item['charges'] for item in batch])
         num_atoms = torch.stack([item['num_atoms'] for item in batch])
         
+        # Add extra dimension to charges to match the 3D node_mask format expected by training code
+        # This is consistent with QM9 dataset collate function
+        charges = charges.unsqueeze(2)
+        
         return {
             'positions': positions,
             'one_hot': one_hot,
