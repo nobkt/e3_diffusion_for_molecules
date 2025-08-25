@@ -206,6 +206,14 @@ def plot_data3d(positions, atom_type, dataset_info, camera_elev=0, camera_azim=0
         ax.set_xlim(-axis_lim, axis_lim)
         ax.set_ylim(-axis_lim, axis_lim)
         ax.set_zlim(-axis_lim, axis_lim)
+    elif 'ase' in dataset_info['name'] or dataset_info.get('is_ase', False):
+        max_value = positions.abs().max().item()
+
+        # axis_lim = 3.2
+        axis_lim = min(40, max(max_value / 1.5 + 0.3, 3.2))
+        ax.set_xlim(-axis_lim, axis_lim)
+        ax.set_ylim(-axis_lim, axis_lim)
+        ax.set_zlim(-axis_lim, axis_lim)
     else:
         raise ValueError(dataset_info['name'])
 
@@ -269,6 +277,14 @@ def plot_data3d_uncertainty(
 
         # axis_lim = 3.2
         axis_lim = min(40, max(max_value / 2 + 0.3, 3.2))
+        ax.set_xlim(-axis_lim, axis_lim)
+        ax.set_ylim(-axis_lim, axis_lim)
+        ax.set_zlim(-axis_lim, axis_lim)
+    elif 'ase' in dataset_info['name'] or dataset_info.get('is_ase', False):
+        max_value = all_positions[0].abs().max().item()
+
+        # axis_lim = 3.2  
+        axis_lim = min(40, max(max_value + 0.3, 3.2))
         ax.set_xlim(-axis_lim, axis_lim)
         ax.set_ylim(-axis_lim, axis_lim)
         ax.set_zlim(-axis_lim, axis_lim)
