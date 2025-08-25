@@ -6,6 +6,33 @@ from equivariant_diffusion.utils import assert_mean_zero_with_mask, remove_mean_
 from qm9.analyze import check_stability
 
 
+def normalize_molecule_coordinates(x, target_scale=3.0):
+    """
+    Normalize molecule coordinates to have a reasonable scale.
+    
+    Args:
+        x: coordinates tensor of shape (batch, nodes, 3)
+        target_scale: target average distance from center in Angstroms
+    
+    Returns:
+        Normalized coordinates
+    """
+    # Center the molecule (remove center of mass)
+    x_centered = x - x.mean(dim=1, keepdim=True)
+    
+    # Calculate current scale (RMS distance from center)
+    current_scale = torch.sqrt((x_centered**2).sum(dim=-1)).mean()
+    
+    # If current scale is too large or too small, rescale
+    if current_scale > 0.1:  # Avoid division by zero
+        scale_factor = target_scale / current_scale
+        x_normalized = x_centered * scale_factor
+    else:
+        x_normalized = x_centered
+        
+    return x_normalized
+
+
 def rotate_chain(z):
     assert z.size(0) == 1
 
@@ -85,6 +112,10 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
             # Repeat last frame to see final sample better.
             chain = torch.cat([chain, chain[-1:].repeat(10, 1, 1)], dim=0)
             x = chain[-1:, :, 0:3]
+            
+            # Normalize coordinates to reasonable molecular scale
+            x = normalize_molecule_coordinates(x, target_scale=3.0)
+            
             one_hot = chain[-1:, :, 3:-1]
             one_hot = torch.argmax(one_hot, dim=2)
 
@@ -92,8 +123,11 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
             x_squeeze = x.squeeze(0).cpu().detach().numpy()
             mol_stable = check_stability(x_squeeze, atom_type, dataset_info)[0]
 
-            # Prepare entire chain.
-            x = chain[:, :, 0:3]
+            # Prepare entire chain with normalized coordinates
+            x_chain = chain[:, :, 0:3]
+            # Apply normalization to the entire chain
+            x_chain = normalize_molecule_coordinates(x_chain, target_scale=3.0)
+            x = x_chain
             one_hot = chain[:, :, 3:-1]
             one_hot = F.one_hot(torch.argmax(one_hot, dim=2), num_classes=len(dataset_info['atom_decoder']))
             charges = torch.round(chain[:, :, -1:]).long()
@@ -103,6 +137,16 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
                 break
             elif i == n_tries - 1:
                 print('Did not find stable molecule, showing last sample.')
+                # Print some debug info about the last sample
+                coord_mean = np.mean(x_squeeze, axis=0)
+                coord_std = np.std(x_squeeze)
+                max_dist = np.max(np.sqrt(np.sum((x_squeeze - coord_mean)**2, axis=1)))
+                print(f"Debug info - Coord std: {coord_std:.2f}, Max dist from center: {max_dist:.2f}")
+                print(f"Atom types: {np.unique(atom_type, return_counts=True)}")
+            else:
+                # Print progress for intermediate attempts
+                coord_std = np.std(x_squeeze)
+                print(f"Attempt {i+1}/{n_tries}: unstable molecule (coord std: {coord_std:.2f})")
 
     else:
         raise ValueError
@@ -140,6 +184,9 @@ def sample(args, device, generative_model, dataset_info,
 
     if args.probabilistic_model == 'diffusion':
         x, h = generative_model.sample(batch_size, max_n_nodes, node_mask, edge_mask, context, fix_noise=fix_noise)
+
+        # Apply coordinate normalization for better molecular geometry
+        x = normalize_molecule_coordinates(x, target_scale=3.0)
 
         assert_correctly_masked(x, node_mask)
         assert_mean_zero_with_mask(x, node_mask)

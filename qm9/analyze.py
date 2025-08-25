@@ -237,12 +237,20 @@ def check_stability(positions, atom_type, dataset_info, debug=False):
                     (atom_decoder[pair[0]], atom_decoder[pair[1]]), dist)
             elif 'ase' in dataset_info['name'] or dataset_info.get('is_ase', False):
                 # For ASE datasets, use the general bond order prediction from OpenBabel functions
-                from qm9.openbabel_functions import predict_bond_order_general
-                order = predict_bond_order_general(atom1, atom2, dist)
+                try:
+                    from qm9.openbabel_functions import predict_bond_order_general
+                    order = predict_bond_order_general(atom1, atom2, dist)
+                except ImportError:
+                    # Fallback to basic bond analysis if OpenBabel not available
+                    order = bond_analyze.get_bond_order(atom1, atom2, dist)
             else:
                 # Default fallback for unknown datasets
-                from qm9.openbabel_functions import predict_bond_order_general
-                order = predict_bond_order_general(atom1, atom2, dist)
+                try:
+                    from qm9.openbabel_functions import predict_bond_order_general
+                    order = predict_bond_order_general(atom1, atom2, dist)
+                except ImportError:
+                    # Fallback to basic bond analysis if OpenBabel not available
+                    order = bond_analyze.get_bond_order(atom1, atom2, dist)
             nr_bonds[i] += order
             nr_bonds[j] += order
     nr_stable_bonds = 0
