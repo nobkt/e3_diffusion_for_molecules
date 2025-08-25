@@ -64,7 +64,7 @@ def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device, dt
         optim.step()
 
         # Update EMA if enabled.
-        if args.ema_decay > 0:
+        if args.ema_decay > 0 and ema is not None:
             ema.update_model_average(model_ema, model)
 
         if i % args.n_report_steps == 0:
