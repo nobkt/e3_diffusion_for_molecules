@@ -86,7 +86,7 @@ def retrieve_dataloaders(cfg):
         all_data = split_data[0] + split_data[1] + split_data[2]  # train + val + test
         n_nodes_counts = {}
         for mol_data in all_data:
-            n_atoms = mol_data.shape[0]
+            n_atoms = mol_data['geometry'].shape[0]
             n_nodes_counts[n_atoms] = n_nodes_counts.get(n_atoms, 0) + 1
         
         # Update dataset_info with computed histogram
@@ -97,7 +97,7 @@ def retrieve_dataloaders(cfg):
         # Compute position statistics to help with normalization factor selection
         position_spans = []
         for mol_data in all_data:
-            positions = mol_data[:, 1:]  # Last 3 columns are positions
+            positions = mol_data['geometry'][:, 1:]  # Last 3 columns are positions
             if positions.shape[0] > 1:  # Only for molecules with multiple atoms
                 mol_span = np.max(positions) - np.min(positions)
                 position_spans.append(mol_span)
@@ -135,8 +135,19 @@ def retrieve_dataloaders(cfg):
                 shuffle=shuffle
             )
         
+        # Apply unit conversion like QM9 datasets
+        qm9_to_eV = {'U0': 27.2114, 'U': 27.2114, 'G': 27.2114, 'H': 27.2114, 'zpve': 27211.4, 'gap': 27.2114, 'homo': 27.2114, 'lumo': 27.2114}
+        
+        for split_name, dataloader in dataloaders.items():
+            if hasattr(dataloader.dataset, 'convert_units'):
+                print(f"Converting units for {split_name} split")
+                dataloader.dataset.convert_units(qm9_to_eV)
+        
         del split_data
-        charge_scale = None
+        
+        # Return charge_scale consistent with QM9 - use atomic number of heaviest atom typically found
+        # This ensures consistent behavior with QM9 charge scaling
+        charge_scale = 4.0  # Similar to max atomic number in QM9 (F=9, but we normalize)
     else:
         raise ValueError(f'Unknown dataset {cfg.dataset}')
 
