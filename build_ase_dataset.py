@@ -250,10 +250,16 @@ def collate_fn(batch):
                 if torch.is_tensor(mol[prop]):
                     prop_values.append(mol[prop])
                 else:
-                    prop_values.append(torch.tensor(float(mol[prop])))
+                    # Try to convert to float, skip if not possible
+                    try:
+                        prop_values.append(torch.tensor(float(mol[prop])))
+                    except (ValueError, TypeError):
+                        # Skip non-numeric properties
+                        continue
             else:
                 prop_values.append(torch.tensor(0.0))  # Default value for missing properties
         
+        # Only add to batch if we have numeric values
         if prop_values:
             batch_dict[prop] = torch.stack(prop_values)
 
@@ -372,10 +378,19 @@ class ASETransform(object):
         
         # Add molecular properties for compatibility with QM9 dataset
         for prop_name, prop_value in properties.items():
-            if isinstance(prop_value, (int, float)):
-                new_data[prop_name] = torch.tensor(float(prop_value))
-            else:
-                new_data[prop_name] = prop_value
+            try:
+                # Try to convert to numeric tensor
+                if isinstance(prop_value, (int, float)):
+                    new_data[prop_name] = torch.tensor(float(prop_value))
+                elif isinstance(prop_value, str):
+                    # Try to parse string as number
+                    new_data[prop_name] = torch.tensor(float(prop_value))
+                else:
+                    # Skip non-numeric properties to avoid collate issues
+                    continue
+            except (ValueError, TypeError):
+                # Skip properties that cannot be converted to numeric values
+                continue
             
         return new_data
 
