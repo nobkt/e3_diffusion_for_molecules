@@ -86,6 +86,8 @@ parser.add_argument('--ase_db_file', type=str, default='./data/ase/molecules.db'
                     help='Path to ASE database file (.db) when using ASE dataset')
 parser.add_argument('--ase_max_entries', type=int, default=None,
                     help='Maximum number of entries to load from ASE database (None = all)')
+parser.add_argument('--validate_ase_db', action='store_true',
+                    help='Validate ASE database quality before training (use with --dataset ase)')
 parser.add_argument('--dequantization', type=str, default='argmax_variational',
                     help='uniform | variational | argmax_variational | deterministic')
 parser.add_argument('--n_report_steps', type=int, default=1)
@@ -209,6 +211,31 @@ kwargs = {'entity': args.wandb_usr, 'name': args.exp_name, 'project': 'e3_diffus
           'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': mode}
 wandb.init(**kwargs)
 wandb.save('*.txt')
+
+# Validate ASE database if requested
+if args.dataset == 'ase' and args.validate_ase_db:
+    print("\n" + "=" * 70)
+    print("ASE Database Validation Requested")
+    print("=" * 70)
+    
+    from build_ase_dataset import validate_ase_database
+    
+    passed, results = validate_ase_database(
+        args.ase_db_file, 
+        max_entries=args.ase_max_entries,
+        verbose=True
+    )
+    
+    if not passed:
+        print("\n❌ Database validation failed!")
+        print("Training may result in high loss values and unstable molecules.")
+        print("Please fix the database issues before training.")
+        print("=" * 70)
+        exit(1)
+    else:
+        print("\n✅ Database validation passed!")
+        print("Proceeding with training...")
+        print("=" * 70)
 
 # Retrieve QM9 dataloaders
 dataloaders, charge_scale = dataset.retrieve_dataloaders(args)
