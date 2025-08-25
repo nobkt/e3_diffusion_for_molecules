@@ -202,6 +202,8 @@ class PredefinedNoiseSchedule(torch.nn.Module):
 
     def forward(self, t):
         t_int = torch.round(t * self.timesteps).long()
+        # Ensure t_int is on the same device as self.gamma for indexing
+        t_int = t_int.to(self.gamma.device)
         return self.gamma[t_int]
 
 
