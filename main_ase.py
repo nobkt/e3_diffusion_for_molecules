@@ -7,7 +7,10 @@ This extends the original main_qm9.py to support ASE databases.
 import copy
 import utils
 import argparse
-import wandb
+try:
+    import wandb
+except ImportError:
+    wandb = None
 from configs.datasets_config import get_dataset_info
 from os.path import join
 from qm9 import dataset
@@ -213,7 +216,7 @@ def main_ase():
         raise utils.FoundNaNException("Something wrong with the mask")
 
     # Initialize wandb if user provided
-    if args.wandb_usr:
+    if args.wandb_usr and wandb is not None:
         wandb.init(project="e3_diffusion_molecules", 
                    name=args.exp_name,
                    config=args)
