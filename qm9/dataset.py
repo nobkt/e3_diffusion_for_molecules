@@ -82,6 +82,24 @@ def retrieve_dataloaders(cfg):
             max_entries=max_entries
         )
         
+        # Filter out molecules with incompatible atoms BEFORE creating datasets
+        # This prevents None values in the collate function
+        qm9_atomic_numbers = set(dataset_info['atomic_nb'])
+        
+        def is_compatible_molecule(mol_data):
+            """Check if molecule contains only atoms compatible with the dataset."""
+            atomic_numbers = mol_data['geometry'][:, 0].astype(int)
+            return all(atomic_num in qm9_atomic_numbers for atomic_num in atomic_numbers)
+        
+        # Filter each split
+        filtered_split_data = []
+        for split_data_list in split_data:
+            compatible_molecules = [mol for mol in split_data_list if is_compatible_molecule(mol)]
+            filtered_split_data.append(compatible_molecules)
+            print(f"Filtered {len(split_data_list) - len(compatible_molecules)} incompatible molecules from split, {len(compatible_molecules)} remaining")
+        
+        split_data = filtered_split_data
+        
         # Compute n_nodes histogram from the actual data
         all_data = split_data[0] + split_data[1] + split_data[2]  # train + val + test
         n_nodes_counts = {}

@@ -507,9 +507,17 @@ class CustomBatchSampler(BatchSampler):
 
 def collate_fn(batch):
     """Collate function for ASE datasets that matches QM9 collate behavior."""
-    # Get all property keys from the batch
+    # Filter out None values (molecules that were filtered out by transform)
+    valid_batch = [mol for mol in batch if mol is not None]
+    
+    if len(valid_batch) == 0:
+        # If all molecules in the batch were filtered out, return None
+        # This should be handled by the DataLoader
+        raise RuntimeError("All molecules in batch were filtered out. Consider using a larger batch size or checking your dataset.")
+    
+    # Get all property keys from the valid batch
     all_keys = set()
-    for mol in batch:
+    for mol in valid_batch:
         all_keys.update(mol.keys())
     
     # Separate geometric properties from molecular properties
@@ -519,13 +527,13 @@ def collate_fn(batch):
     # Stack geometric properties
     batch_dict = {}
     for prop in geometric_keys:
-        if prop in batch[0]:
-            batch_dict[prop] = qm9_collate.batch_stack([mol[prop] for mol in batch])
+        if prop in valid_batch[0]:
+            batch_dict[prop] = qm9_collate.batch_stack([mol[prop] for mol in valid_batch])
     
     # Handle molecular properties (scalar values)
     for prop in molecular_prop_keys:
         prop_values = []
-        for mol in batch:
+        for mol in valid_batch:
             if prop in mol:
                 if torch.is_tensor(mol[prop]):
                     prop_values.append(mol[prop])
@@ -638,25 +646,14 @@ class ASETransform(object):
         # Extract atomic numbers and create one-hot encoding
         atom_types = torch.from_numpy(geometry[:, 0].astype(int)[:, None])
         
-        # Handle atoms not in QM9 atom set by mapping them to the closest equivalent
-        # or filtering them out based on configuration
+        # Safety check: molecules should already be filtered at dataset level
+        # but this provides a fallback in case filtering was missed
         qm9_atomic_numbers = set(self.atomic_number_list.squeeze().tolist())
-        valid_atoms = []
         
-        for i, atomic_num in enumerate(geometry[:, 0].astype(int)):
-            if atomic_num in qm9_atomic_numbers:
-                valid_atoms.append(i)
-            else:
-                # For molecules with atoms not in QM9 set, we could either:
-                # 1. Skip the entire molecule (current approach)
-                # 2. Map to closest atom type
-                # 3. Use a special "other" category
-                print(f"Warning: Atom with atomic number {atomic_num} not in QM9 atom set, skipping molecule")
-                return None  # Skip this molecule
-        
-        if len(valid_atoms) != len(geometry):
-            print(f"Warning: Molecule contains non-QM9 atoms, skipping")
-            return None
+        for atomic_num in geometry[:, 0].astype(int):
+            if atomic_num not in qm9_atomic_numbers:
+                # This should not happen if dataset-level filtering worked correctly
+                return None  # Skip this molecule as fallback
         
         one_hot = (atom_types == self.atomic_number_list.long()).float()
         new_data['one_hot'] = one_hot
