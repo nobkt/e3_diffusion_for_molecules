@@ -111,3 +111,33 @@ The ASE loader converts molecular structures to the same tensor format used by Q
 - Properties are stored as 1D tensors
 
 The data is automatically padded and collated for efficient batch processing.
+
+## Evaluation
+
+After training a model with ASE database, you can use the evaluation scripts:
+
+### eval_analyze.py
+
+Analyze molecular properties, stability, and uniqueness:
+
+```bash
+# For a model trained with ASE database
+python eval_analyze.py --model_path outputs/my_ase_model --n_samples 100
+
+# If the ASE database path has changed or you want to use a different one
+python eval_analyze.py --model_path outputs/my_ase_model --n_samples 100 --ase_db_path /new/path/to/molecules.db
+```
+
+### eval_sample.py
+
+Generate molecular samples and visualizations:
+
+```bash
+# For a model trained with ASE database
+python eval_sample.py --model_path outputs/my_ase_model --n_tries 10 --n_nodes 15
+
+# With custom ASE database path
+python eval_sample.py --model_path outputs/my_ase_model --ase_db_path /path/to/molecules.db
+```
+
+The evaluation scripts automatically detect when a model was trained with `dataset=ase_db` and load the appropriate ASE database. If the original database path is not available, you can specify a new one using the `--ase_db_path` argument.
