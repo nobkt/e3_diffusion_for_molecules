@@ -138,6 +138,10 @@ def plot_molecule(ax, positions, atom_type, alpha, spheres_3d, hex_bg_color,
                 draw_edge_int = bond_analyze.geom_predictor(pair, dist)
                 # Draw edge outputs 1 / -1 value, convert to True / False.
                 line_width = 2
+            elif dataset_info['name'] == 'ase_db':
+                # For ASE database, use the same bond analysis as QM9
+                draw_edge_int = bond_analyze.get_bond_order(atom1, atom2, dist)
+                line_width = (3 - 2) * 2 * 2
             else:
                 raise Exception('Wrong dataset_info name')
             draw_edge = draw_edge_int > 0
@@ -182,7 +186,7 @@ def plot_data3d(positions, atom_type, dataset_info, camera_elev=0, camera_azim=0
     plot_molecule(ax, positions, atom_type, alpha, spheres_3d,
                   hex_bg_color, dataset_info)
 
-    if 'qm9' in dataset_info['name']:
+    if 'qm9' in dataset_info['name'] or dataset_info['name'] == 'ase_db':
         max_value = positions.abs().max().item()
 
         # axis_lim = 3.2
@@ -248,7 +252,7 @@ def plot_data3d_uncertainty(
         plot_molecule(ax, positions, atom_type, alpha, spheres_3d,
                       hex_bg_color, dataset_info)
 
-    if 'qm9' in dataset_info['name']:
+    if 'qm9' in dataset_info['name'] or dataset_info['name'] == 'ase_db':
         max_value = all_positions[0].abs().max().item()
 
         # axis_lim = 3.2

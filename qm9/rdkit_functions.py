@@ -181,6 +181,9 @@ def build_xae_molecule(positions, atom_types, dataset_info):
                 order = get_bond_order(atom_decoder[pair[0]], atom_decoder[pair[1]], dists[i, j])
             elif dataset_info['name'] == 'geom':
                 order = geom_predictor((atom_decoder[pair[0]], atom_decoder[pair[1]]), dists[i, j], limit_bonds_to_one=True)
+            elif dataset_info['name'] == 'ase_db':
+                # For ASE database, use the same bond analysis as QM9
+                order = get_bond_order(atom_decoder[pair[0]], atom_decoder[pair[1]], dists[i, j])
             # TODO: a batched version of get_bond_order to avoid the for loop
             if order > 0:
                 # Warning: the graph should be DIRECTED
