@@ -6,3 +6,4 @@ torchvision
 tqdm
 wandb
 ase
+openbabel-wheel

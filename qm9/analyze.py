@@ -4,6 +4,12 @@ try:
     use_rdkit = True
 except ModuleNotFoundError:
     use_rdkit = False
+
+try:
+    from qm9.openbabel_functions import BasicMolecularMetricsOpenBabel, is_openbabel_available
+    use_openbabel = is_openbabel_available()
+except ImportError:
+    use_openbabel = False
 import qm9.dataset as dataset
 import torch
 import matplotlib
@@ -228,6 +234,12 @@ def check_stability(positions, atom_type, dataset_info, debug=False):
             elif dataset_info['name'] == 'geom':
                 order = bond_analyze.geom_predictor(
                     (atom_decoder[pair[0]], atom_decoder[pair[1]]), dist)
+            elif dataset_info['name'] == 'ase_db':
+                # For ASE database, use the same bond analysis as QM9
+                order = bond_analyze.get_bond_order(atom1, atom2, dist)
+            else:
+                # Default case - use QM9 bond analysis
+                order = bond_analyze.get_bond_order(atom1, atom2, dist)
             nr_bonds[i] += order
             nr_bonds[j] += order
     nr_stable_bonds = 0
@@ -282,6 +294,11 @@ def main_check_stability(remove_h: bool, batch_size=32):
     if use_rdkit:
         from qm9.rdkit_functions import BasicMolecularMetrics
         metrics = BasicMolecularMetrics(dataset_info)
+    elif use_openbabel and ('ase_db' in dataset_info.get('name', '')):
+        # Use OpenBabel for ASE database
+        metrics = BasicMolecularMetricsOpenBabel(dataset_info)
+    else:
+        metrics = None
 
     atom_decoder = dataset_info['atom_decoder']
 
@@ -312,6 +329,11 @@ def main_check_stability(remove_h: bool, batch_size=32):
         print('For test')
         metrics.evaluate(test_loader)
         print('For train')
+        metrics.evaluate(train_loader)
+    elif use_openbabel and metrics:
+        print('For test (using OpenBabel)')
+        metrics.evaluate(test_loader)
+        print('For train (using OpenBabel)')
         metrics.evaluate(train_loader)
     else:
         print('For train')
@@ -365,8 +387,12 @@ def analyze_stability_for_molecules(molecule_list, dataset_info):
     if use_rdkit:
         metrics = BasicMolecularMetrics(dataset_info)
         rdkit_metrics = metrics.evaluate(processed_list)
-        #print("Unique molecules:", rdkit_metrics[1])
         return validity_dict, rdkit_metrics
+    elif use_openbabel and ('ase_db' in dataset_info.get('name', '')):
+        # Use OpenBabel for ASE database
+        metrics = BasicMolecularMetricsOpenBabel(dataset_info)
+        openbabel_metrics = metrics.evaluate(processed_list)
+        return validity_dict, openbabel_metrics
     else:
         return validity_dict, None
 
