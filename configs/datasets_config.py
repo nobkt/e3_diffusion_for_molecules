@@ -134,6 +134,34 @@ geom_no_h = {
     'with_h': False}
 
 
+# ASE database configurations - these can be dynamically updated based on actual data
+ase_db_with_h = {
+    'name': 'ase_db',
+    'atom_encoder': {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4, 'P': 5, 'S': 6, 'Cl': 7, 'Br': 8, 'I': 9},  # Common atoms, will be updated
+    'atom_decoder': ['H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Br', 'I'],  # Will be updated based on actual data
+    'max_n_nodes': 100,  # Default, will be updated based on actual data
+    'n_nodes': {},  # Will be populated based on actual data
+    'atom_types': {},  # Will be populated based on actual data
+    'distances': [],  # Will be populated based on actual data if needed
+    'colors_dic': ['#FFFFFF99', 'C7', 'C0', 'C3', 'C1', 'C2', 'C4', 'C5', 'C6', 'C8'],
+    'radius_dic': [0.46, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77],
+    'with_h': True
+}
+
+ase_db_without_h = {
+    'name': 'ase_db',
+    'atom_encoder': {'C': 0, 'N': 1, 'O': 2, 'F': 3, 'P': 4, 'S': 5, 'Cl': 6, 'Br': 7, 'I': 8},  # Common non-H atoms
+    'atom_decoder': ['C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Br', 'I'],  # Will be updated based on actual data
+    'max_n_nodes': 100,  # Default, will be updated based on actual data
+    'n_nodes': {},  # Will be populated based on actual data
+    'atom_types': {},  # Will be populated based on actual data
+    'distances': [],  # Will be populated based on actual data if needed
+    'colors_dic': ['C7', 'C0', 'C3', 'C1', 'C2', 'C4', 'C5', 'C6', 'C8'],
+    'radius_dic': [0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77],
+    'with_h': False
+}
+
+
 def get_dataset_info(dataset_name, remove_h):
     if dataset_name == 'qm9':
         if not remove_h:
@@ -150,5 +178,10 @@ def get_dataset_info(dataset_name, remove_h):
             return qm9_second_half
         else:
             raise Exception('Missing config for %s without hydrogens' % dataset_name)
+    elif dataset_name == 'ase_db':
+        if not remove_h:
+            return ase_db_with_h
+        else:
+            return ase_db_without_h
     else:
         raise Exception("Wrong dataset %s" % dataset_name)

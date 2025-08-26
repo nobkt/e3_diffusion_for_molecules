@@ -72,9 +72,15 @@ parser.add_argument('--sin_embedding', type=eval, default=False,
 # <-- EGNN args
 parser.add_argument('--ode_regularization', type=float, default=1e-3)
 parser.add_argument('--dataset', type=str, default='qm9',
-                    help='qm9 | qm9_second_half (train only on the last 50K samples of the training dataset)')
+                    help='qm9 | qm9_second_half (train only on the last 50K samples of the training dataset) | ase_db (load from ASE database)')
 parser.add_argument('--datadir', type=str, default='qm9/temp',
                     help='qm9 directory')
+parser.add_argument('--ase_db_path', type=str, default=None,
+                    help='Path to ASE database file (required when using ase_db dataset)')
+parser.add_argument('--split_ratios', nargs=3, type=float, default=[0.8, 0.1, 0.1],
+                    help='Train, validation, test split ratios for ASE database (should sum to 1.0)')
+parser.add_argument('--ase_to_eV', type=str, default='{}',
+                    help='JSON string of unit conversion factors for ASE data (e.g., {"energy": 27.2114})')
 parser.add_argument('--filter_n_atoms', type=int, default=None,
                     help='When set to an integer value, QM9 will only contain molecules of that amount of atoms')
 parser.add_argument('--dequantization', type=str, default='argmax_variational',
@@ -116,6 +122,22 @@ parser.add_argument('--normalization_factor', type=float, default=1,
 parser.add_argument('--aggregation_method', type=str, default='sum',
                     help='"sum" or "mean"')
 args = parser.parse_args()
+
+# Parse unit conversion for ASE data
+import json
+try:
+    args.ase_to_eV = json.loads(args.ase_to_eV)
+except json.JSONDecodeError:
+    print(f"Warning: Could not parse ase_to_eV argument: {args.ase_to_eV}")
+    args.ase_to_eV = {}
+
+# Validate ASE database arguments
+if 'ase_db' in args.dataset and args.ase_db_path is None:
+    raise ValueError("--ase_db_path must be specified when using ase_db dataset")
+
+# Validate split ratios
+if abs(sum(args.split_ratios) - 1.0) > 1e-6:
+    raise ValueError(f"Split ratios must sum to 1.0, got {sum(args.split_ratios)}")
 
 dataset_info = get_dataset_info(args.dataset, args.remove_h)
 
