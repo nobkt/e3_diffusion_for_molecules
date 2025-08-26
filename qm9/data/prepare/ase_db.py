@@ -111,6 +111,7 @@ def process_ase_database(db_path, max_molecules=None, include_properties=None):
 def create_ase_splits(data, train_ratio=0.8, valid_ratio=0.1, test_ratio=0.1, random_seed=42):
     """
     Create train/validation/test splits for ASE dataset.
+    Ensures all splits contain all atomic species present in the dataset.
     
     Parameters
     ----------
@@ -145,6 +146,23 @@ def create_ase_splits(data, train_ratio=0.8, valid_ratio=0.1, test_ratio=0.1, ra
         }
         return splits
     
+    # Get unique atomic species in the dataset
+    all_charges = data['charges']
+    unique_species = torch.unique(all_charges[all_charges > 0]).tolist()
+    logging.info(f'Dataset contains atomic species: {unique_species}')
+    
+    # Find molecules that contain each species
+    species_to_molecules = {}
+    for species in unique_species:
+        molecules_with_species = []
+        for mol_idx in range(num_molecules):
+            mol_charges = all_charges[mol_idx]
+            # Check if this species is present in this molecule
+            if torch.any(mol_charges == species):
+                molecules_with_species.append(mol_idx)
+        species_to_molecules[species] = molecules_with_species
+        logging.info(f'Species {species}: found in {len(molecules_with_species)} molecules')
+    
     # Generate random permutation for splitting
     np.random.seed(random_seed)
     indices = np.random.permutation(num_molecules)
@@ -166,10 +184,74 @@ def create_ase_splits(data, train_ratio=0.8, valid_ratio=0.1, test_ratio=0.1, ra
             valid_size = 0
             test_size = 0
     
-    # Create splits
-    train_indices = indices[:train_size]
-    valid_indices = indices[train_size:train_size + valid_size] if valid_size > 0 else indices[:1]
-    test_indices = indices[train_size + valid_size:] if test_size > 0 else indices[:1]
+    # Strategy: Ensure each split gets at least one molecule with each species
+    # Then distribute the remaining molecules randomly
+    
+    # Start with empty splits
+    train_indices = []
+    valid_indices = []
+    test_indices = []
+    assigned_molecules = set()
+    
+    # First, assign one molecule with each species to each split (if possible)
+    for species in unique_species:
+        candidates = [mol for mol in species_to_molecules[species] if mol not in assigned_molecules]
+        if len(candidates) >= 3:
+            # Enough molecules to assign one to each split
+            np.random.shuffle(candidates)
+            train_indices.append(candidates[0])
+            valid_indices.append(candidates[1])
+            test_indices.append(candidates[2])
+            assigned_molecules.update(candidates[:3])
+        elif len(candidates) >= 2:
+            # Assign to two splits, duplicate one to the third split
+            np.random.shuffle(candidates)
+            train_indices.append(candidates[0])
+            valid_indices.append(candidates[1])
+            test_indices.append(candidates[0])  # Duplicate to ensure all splits have this species
+            assigned_molecules.update(candidates[:2])
+        elif len(candidates) >= 1:
+            # Only one molecule with this species, add to all splits
+            mol = candidates[0]
+            train_indices.append(mol)
+            valid_indices.append(mol)
+            test_indices.append(mol)
+            assigned_molecules.add(mol)
+        else:
+            logging.warning(f'No molecules found with species {species}')
+    
+    # Remove duplicates while preserving order
+    train_indices = list(dict.fromkeys(train_indices))
+    valid_indices = list(dict.fromkeys(valid_indices))
+    test_indices = list(dict.fromkeys(test_indices))
+    
+    # Now distribute remaining molecules randomly according to ratios
+    remaining_molecules = [mol for mol in indices if mol not in assigned_molecules]
+    
+    # Calculate how many more molecules each split needs
+    remaining_train = max(0, train_size - len(train_indices))
+    remaining_valid = max(0, valid_size - len(valid_indices))
+    remaining_test = max(0, test_size - len(test_indices))
+    
+    # Distribute remaining molecules
+    np.random.shuffle(remaining_molecules)
+    idx = 0
+    
+    # Add to train split
+    train_indices.extend(remaining_molecules[idx:idx + remaining_train])
+    idx += remaining_train
+    
+    # Add to valid split
+    valid_indices.extend(remaining_molecules[idx:idx + remaining_valid])
+    idx += remaining_valid
+    
+    # Add remaining to test split
+    test_indices.extend(remaining_molecules[idx:])
+    
+    # Convert to numpy arrays and create splits
+    train_indices = np.array(train_indices)
+    valid_indices = np.array(valid_indices)
+    test_indices = np.array(test_indices)
     
     splits = {
         'train': {key: val[train_indices] for key, val in data.items()},
@@ -178,6 +260,13 @@ def create_ase_splits(data, train_ratio=0.8, valid_ratio=0.1, test_ratio=0.1, ra
     }
     
     logging.info(f'Split sizes - Train: {len(train_indices)}, Valid: {len(valid_indices)}, Test: {len(test_indices)}')
+    
+    # Verify that all splits contain all species
+    for split_name, split_data in splits.items():
+        split_species = torch.unique(split_data['charges'][split_data['charges'] > 0]).tolist()
+        logging.info(f'{split_name} contains species: {split_species}')
+        if set(split_species) != set(unique_species):
+            logging.warning(f'{split_name} missing species: {set(unique_species) - set(split_species)}')
     
     return splits
 

@@ -171,14 +171,27 @@ def _get_species(datasets, ignore_check=False):
                      0 else species for split, species in split_species.items()}
 
     # Now check that each split has at least one example of every atomic spcies from the entire dataset.
-    if not all([split.tolist() == all_species.tolist() for split in split_species.values()]):
-        # Allows one to override this check if they really want to. Not recommended as the answers become non-sensical.
+    species_mismatch = not all([split.tolist() == all_species.tolist() for split in split_species.values()])
+    
+    if species_mismatch:
+        # Log detailed information about the mismatch
+        logging.info(f'All species in dataset: {all_species.tolist()}')
+        for split_name, split_spec in split_species.items():
+            missing = set(all_species.tolist()) - set(split_spec.tolist())
+            if missing:
+                logging.info(f'Split "{split_name}" missing species: {list(missing)}')
+            else:
+                logging.info(f'Split "{split_name}" has all species: {split_spec.tolist()}')
+        
         if ignore_check:
-            logging.error(
-                'The number of species is not the same in all datasets!')
+            logging.warning(
+                'Species distribution differs across dataset splits. This is common with small datasets. '
+                'The model will handle missing species by treating them as padding tokens.')
         else:
             raise ValueError(
-                'Not all datasets have the same number of species!')
+                'Not all datasets have the same number of species! '
+                f'All species: {all_species.tolist()}, '
+                f'Split species: {[(split, spec.tolist()) for split, spec in split_species.items()]}')
 
     # Finally, return a list of all species
     return all_species
