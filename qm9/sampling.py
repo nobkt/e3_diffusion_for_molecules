@@ -57,8 +57,11 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
         n_nodes = 19
     elif args.dataset == 'geom':
         n_nodes = 44
+    elif 'ase_db' in args.dataset:
+        # For ASE database datasets, use a reasonable default molecule size
+        n_nodes = 19  # Same default as QM9 datasets
     else:
-        raise ValueError()
+        raise ValueError(f"Unsupported dataset: {args.dataset}. Supported datasets are: qm9, qm9_second_half, qm9_first_half, geom, ase_db")
 
     # TODO FIX: This conditioning just zeros.
     if args.context_node_nf > 0:
