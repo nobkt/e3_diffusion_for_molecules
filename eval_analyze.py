@@ -114,11 +114,19 @@ def main():
     parser.add_argument('--model_path', type=str, default="outputs/edm_1",
                         help='Specify model path')
     parser.add_argument('--n_samples', type=int, default=100,
-                        help='Specify model path')
+                        help='Number of samples to generate')
     parser.add_argument('--batch_size_gen', type=int, default=100,
-                        help='Specify model path')
+                        help='Batch size for generation')
     parser.add_argument('--save_to_xyz', type=eval, default=False,
                         help='Should save samples to xyz files.')
+    
+    # ASE database arguments (for models trained with ase_db dataset)
+    parser.add_argument('--ase_db_path', type=str, default=None,
+                        help='Path to ASE database file (required for models trained with ase_db dataset)')
+    parser.add_argument('--split_ratios', nargs=3, type=float, default=[0.8, 0.1, 0.1],
+                        help='Train, validation, test split ratios for ASE database (should sum to 1.0)')
+    parser.add_argument('--ase_to_eV', type=str, default='{}',
+                        help='JSON string of unit conversion factors for ASE data (e.g., {"energy": 27.2114})')
 
     eval_args, unparsed_args = parser.parse_known_args()
 
@@ -132,6 +140,38 @@ def main():
         args.normalization_factor = 1
     if not hasattr(args, 'aggregation_method'):
         args.aggregation_method = 'sum'
+    
+    # Handle ASE database arguments for models trained with ase_db dataset
+    if hasattr(args, 'dataset') and args.dataset == 'ase_db':
+        import json
+        
+        # If ASE database path is provided via command line, use it
+        if eval_args.ase_db_path is not None:
+            args.ase_db_path = eval_args.ase_db_path
+        # Otherwise, check if it exists in the loaded args
+        elif not hasattr(args, 'ase_db_path') or args.ase_db_path is None:
+            raise ValueError(
+                "Model was trained with ASE database but no ASE database path is available. "
+                "Please provide --ase_db_path argument."
+            )
+        
+        # Set other ASE-related arguments if not present
+        if not hasattr(args, 'split_ratios'):
+            args.split_ratios = eval_args.split_ratios
+        if not hasattr(args, 'ase_to_eV'):
+            try:
+                args.ase_to_eV = json.loads(eval_args.ase_to_eV)
+            except json.JSONDecodeError:
+                args.ase_to_eV = {}
+        elif isinstance(args.ase_to_eV, str):
+            try:
+                args.ase_to_eV = json.loads(args.ase_to_eV)
+            except json.JSONDecodeError:
+                args.ase_to_eV = {}
+        
+        print(f"Using ASE database: {args.ase_db_path}")
+        print(f"Split ratios: {args.split_ratios}")
+        print(f"Unit conversions: {args.ase_to_eV}")
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if args.cuda else "cpu")
