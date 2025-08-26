@@ -291,11 +291,15 @@ def main_check_stability(remove_h: bool, batch_size=32):
 
     dataset_info = datasets_config.qm9_with_h
     dataloaders, charge_scale = dataset.retrieve_dataloaders(cfg)
-    if use_rdkit:
+    
+    # For ase_db dataset, prioritize OpenBabel over RDKit
+    if 'ase_db' in dataset_info.get('name', '') and use_openbabel:
+        metrics = BasicMolecularMetricsOpenBabel(dataset_info)
+    elif use_rdkit:
         from qm9.rdkit_functions import BasicMolecularMetrics
         metrics = BasicMolecularMetrics(dataset_info)
-    elif use_openbabel and ('ase_db' in dataset_info.get('name', '')):
-        # Use OpenBabel for ASE database
+    elif use_openbabel:
+        # Fallback to OpenBabel for other datasets if RDKit is not available
         metrics = BasicMolecularMetricsOpenBabel(dataset_info)
     else:
         metrics = None
@@ -325,20 +329,28 @@ def main_check_stability(remove_h: bool, batch_size=32):
 
     train_loader = process_loader(dataloaders['train'])
     test_loader = process_loader(dataloaders['test'])
-    if use_rdkit:
-        print('For test')
-        metrics.evaluate(test_loader)
-        print('For train')
-        metrics.evaluate(train_loader)
-    elif use_openbabel and metrics:
-        print('For test (using OpenBabel)')
-        metrics.evaluate(test_loader)
-        print('For train (using OpenBabel)')
-        metrics.evaluate(train_loader)
+    
+    # Use appropriate metrics based on dataset and availability
+    if metrics is not None:
+        if 'ase_db' in dataset_info.get('name', '') and use_openbabel:
+            print('For test (using OpenBabel for ase_db)')
+            metrics.evaluate(test_loader)
+            print('For train (using OpenBabel for ase_db)')
+            metrics.evaluate(train_loader)
+        elif use_rdkit:
+            print('For test (using RDKit)')
+            metrics.evaluate(test_loader)
+            print('For train (using RDKit)')
+            metrics.evaluate(train_loader)
+        else:
+            print('For test (using OpenBabel)')
+            metrics.evaluate(test_loader)
+            print('For train (using OpenBabel)')
+            metrics.evaluate(train_loader)
     else:
-        print('For train')
+        print('For train (using basic stability check)')
         test_validity_for(train_loader)
-        print('For test')
+        print('For test (using basic stability check)')
         test_validity_for(test_loader)
 
 
@@ -384,12 +396,17 @@ def analyze_stability_for_molecules(molecule_list, dataset_info):
         'atm_stable': fraction_atm_stable,
     }
 
-    if use_rdkit:
+    # For ase_db dataset, prioritize OpenBabel over RDKit
+    if 'ase_db' in dataset_info.get('name', '') and use_openbabel:
+        metrics = BasicMolecularMetricsOpenBabel(dataset_info)
+        openbabel_metrics = metrics.evaluate(processed_list)
+        return validity_dict, openbabel_metrics
+    elif use_rdkit:
         metrics = BasicMolecularMetrics(dataset_info)
         rdkit_metrics = metrics.evaluate(processed_list)
         return validity_dict, rdkit_metrics
-    elif use_openbabel and ('ase_db' in dataset_info.get('name', '')):
-        # Use OpenBabel for ASE database
+    elif use_openbabel:
+        # Fallback to OpenBabel for other datasets if RDKit is not available
         metrics = BasicMolecularMetricsOpenBabel(dataset_info)
         openbabel_metrics = metrics.evaluate(processed_list)
         return validity_dict, openbabel_metrics
