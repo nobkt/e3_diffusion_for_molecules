@@ -90,11 +90,20 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
     for split_name, split_indices in [('train', train_indices), ('valid', valid_indices), ('test', test_indices)]:
         split_data = {}
         for key, values in dataset_data.items():
-            if len(split_indices) > 0:
+            if key.startswith('_'):
+                # Metadata keys - copy as-is to all splits
+                split_data[key] = values
+            elif len(split_indices) > 0:
                 split_data[key] = values[split_indices]
             else:
-                # Handle empty splits
-                split_data[key] = values[:0]  # Empty tensor with correct shape
+                # Handle empty splits - create empty tensor with correct shape
+                if isinstance(values, torch.Tensor):
+                    if len(values.shape) == 1:
+                        split_data[key] = torch.empty(0, dtype=values.dtype)
+                    else:
+                        split_data[key] = torch.empty(0, *values.shape[1:], dtype=values.dtype)
+                else:
+                    split_data[key] = values  # For non-tensor metadata
         datasets[split_name] = split_data
     
     # Get species information
