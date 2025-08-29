@@ -208,6 +208,8 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=T
     dataset_data : dict
         Dictionary with tensors in the required format
     """
+    from qm9.openbabel_functions import extract_molecular_descriptors_ase_openbabel
+    
     max_atoms = max(len(atoms) for atoms in atoms_list)
     n_molecules = len(atoms_list)
     
@@ -230,6 +232,16 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=T
         if any(prop in props for props in properties_list):
             property_tensors[prop] = torch.zeros(n_molecules, dtype=torch.float32)
     
+    # Add new molecular descriptor properties
+    property_tensors['molecular_weight'] = torch.zeros(n_molecules, dtype=torch.float32)
+    property_tensors['pi_conjugation_ratio'] = torch.zeros(n_molecules, dtype=torch.float32)
+    
+    # For categorical features, we'll store them as lists first, then encode
+    all_atom_types = set()
+    all_functional_groups = set()
+    atom_types_list = []
+    functional_groups_list = []
+
     for i, (atoms, props) in enumerate(zip(atoms_list, properties_list)):
         pos = torch.tensor(atoms.positions, dtype=torch.float32)
         atomic_numbers = torch.tensor(atoms.numbers, dtype=torch.long)
@@ -250,7 +262,7 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=T
             positions[i, :n_atoms] = pos
             charges[i, :n_atoms] = atomic_numbers
         
-        # Store properties
+        # Store existing properties
         for prop_name, tensor in property_tensors.items():
             if prop_name in props:
                 try:
@@ -258,7 +270,54 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=T
                 except (ValueError, TypeError):
                     # Handle cases where property can't be converted to float
                     tensor[i] = 0.0
+        
+        # Extract molecular descriptors using ASE and OpenBabel
+        try:
+            descriptors = extract_molecular_descriptors_ase_openbabel(atoms)
+            
+            # Store molecular weight and π conjugation ratio
+            property_tensors['molecular_weight'][i] = descriptors['molecular_weight']
+            property_tensors['pi_conjugation_ratio'][i] = descriptors['pi_conjugation_ratio']
+            
+            # Collect atom types and functional groups for later encoding
+            atom_types_list.append(descriptors['atom_types'])
+            functional_groups_list.append(descriptors['functional_groups'])
+            
+            # Update sets for encoding
+            all_atom_types.update(descriptors['atom_types'])
+            all_functional_groups.update(descriptors['functional_groups'])
+            
+        except Exception as e:
+            print(f"Warning: Failed to extract descriptors for molecule {i}: {e}")
+            # Fill with default values
+            property_tensors['molecular_weight'][i] = 0.0
+            property_tensors['pi_conjugation_ratio'][i] = 0.0
+            atom_types_list.append([])
+            functional_groups_list.append([])
     
+    # Create encodings for categorical features
+    atom_types_sorted = sorted(list(all_atom_types))
+    functional_groups_sorted = sorted(list(all_functional_groups))
+    
+    # Create binary encodings for atom types and functional groups
+    if atom_types_sorted:
+        atom_types_encoding = torch.zeros(n_molecules, len(atom_types_sorted), dtype=torch.float32)
+        for i, mol_atom_types in enumerate(atom_types_list):
+            for atom_type in mol_atom_types:
+                if atom_type in atom_types_sorted:
+                    idx = atom_types_sorted.index(atom_type)
+                    atom_types_encoding[i, idx] = 1.0
+        property_tensors['atom_types_encoding'] = atom_types_encoding
+    
+    if functional_groups_sorted:
+        functional_groups_encoding = torch.zeros(n_molecules, len(functional_groups_sorted), dtype=torch.float32)
+        for i, mol_functional_groups in enumerate(functional_groups_list):
+            for fg in mol_functional_groups:
+                if fg in functional_groups_sorted:
+                    idx = functional_groups_sorted.index(fg)
+                    functional_groups_encoding[i, idx] = 1.0
+        property_tensors['functional_groups_encoding'] = functional_groups_encoding
+
     dataset_data = {
         'positions': positions,
         'charges': charges,
@@ -267,6 +326,10 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=T
     
     # Add property tensors
     dataset_data.update(property_tensors)
+    
+    # Store the atom types and functional groups mappings for later use
+    dataset_data['_atom_types_mapping'] = atom_types_sorted
+    dataset_data['_functional_groups_mapping'] = functional_groups_sorted
     
     return dataset_data
 

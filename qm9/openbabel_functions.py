@@ -305,6 +305,214 @@ class BasicMolecularMetricsOpenBabel(object):
         return fragments
 
 
+# Molecular descriptor extraction functions for ASE database conditioning
+def extract_atom_types_from_ase(atoms):
+    """
+    Extract unique atom types from ASE Atoms object
+    
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        ASE atoms object
+        
+    Returns
+    -------
+    atom_types : list
+        List of unique atomic symbols in the molecule
+    """
+    return sorted(list(set(atoms.get_chemical_symbols())))
+
+
+def extract_molecular_weight_from_ase(atoms):
+    """
+    Calculate molecular weight from ASE Atoms object
+    
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        ASE atoms object
+        
+    Returns
+    -------
+    molecular_weight : float
+        Molecular weight in atomic mass units (u)
+    """
+    try:
+        from ase.data import atomic_masses
+        total_mass = 0.0
+        for atomic_number in atoms.numbers:
+            total_mass += atomic_masses[atomic_number]
+        return total_mass
+    except ImportError:
+        # Fallback to simple calculation if ase.data not available
+        atomic_masses_dict = {
+            1: 1.008, 6: 12.011, 7: 14.007, 8: 15.999, 9: 18.998,
+            15: 30.974, 16: 32.065, 17: 35.453, 35: 79.904, 53: 126.90
+        }
+        total_mass = 0.0
+        for atomic_number in atoms.numbers:
+            total_mass += atomic_masses_dict.get(atomic_number, atomic_number)
+        return total_mass
+
+
+def extract_functional_groups_openbabel(mol):
+    """
+    Extract functional groups from OpenBabel molecule
+    
+    Parameters
+    ----------
+    mol : openbabel.OBMol
+        OpenBabel molecule object
+        
+    Returns
+    -------
+    functional_groups : list
+        List of detected functional group names
+    """
+    if not OPENBABEL_AVAILABLE or mol is None:
+        return []
+    
+    functional_groups = []
+    
+    try:
+        # Convert to pybel for easier pattern matching
+        pybel_mol = pybel.Molecule(mol)
+        
+        # Define common functional group SMARTS patterns
+        functional_group_patterns = {
+            'hydroxyl': '[OH]',        # -OH
+            'carbonyl': '[CX3]=[OX1]', # C=O
+            'carboxyl': '[CX3](=O)[OX2H1]',  # -COOH
+            'aldehyde': '[CX3H1](=O)[#6]',   # -CHO
+            'ketone': '[CX3](=O)([#6])[#6]', # ketone C=O
+            'amino': '[NX3;H2,H1;!$(NC=O)]',  # -NH2, -NH-
+            'nitro': '[N+](=O)[O-]',   # -NO2
+            'chloro': '[Cl]',          # -Cl
+            'bromo': '[Br]',           # -Br
+            'fluoro': '[F]',           # -F
+            'iodo': '[I]',             # -I
+            'methyl': '[CH3]',         # -CH3
+            'methoxy': '[OX2]([#6])[CH3]',  # -OCH3
+            'phenyl': 'c1ccccc1',      # benzene ring
+        }
+        
+        # Search for each functional group pattern
+        for group_name, smarts_pattern in functional_group_patterns.items():
+            try:
+                matches = pybel_mol.OBMol.HasSubstructMatch(pybel.readstring("smt", smarts_pattern).OBMol)
+                if matches:
+                    functional_groups.append(group_name)
+            except:
+                continue  # Skip if pattern matching fails
+                
+    except Exception:
+        pass  # Return empty list if analysis fails
+    
+    return functional_groups
+
+
+def extract_pi_conjugation_ratio_openbabel(mol):
+    """
+    Calculate π conjugation ratio (double/aromatic bonds to total bonds) using OpenBabel
+    
+    Parameters
+    ----------
+    mol : openbabel.OBMol
+        OpenBabel molecule object
+        
+    Returns
+    -------
+    pi_ratio : float
+        Ratio of π bonds (double + aromatic) to total bonds
+    """
+    if not OPENBABEL_AVAILABLE or mol is None:
+        return 0.0
+    
+    try:
+        total_bonds = mol.NumBonds()
+        if total_bonds == 0:
+            return 0.0
+        
+        pi_bonds = 0
+        
+        # Count double bonds and aromatic bonds
+        for i in range(mol.NumBonds()):
+            bond = mol.GetBond(i)
+            bond_order = bond.GetBondOrder()
+            
+            # Count double bonds (bond order = 2)
+            if bond_order == 2:
+                pi_bonds += 1
+            # Count aromatic bonds (special handling)
+            elif bond.IsAromatic():
+                pi_bonds += 1
+        
+        # Calculate ratio
+        pi_ratio = float(pi_bonds) / float(total_bonds)
+        return pi_ratio
+        
+    except Exception:
+        return 0.0
+
+
+def extract_molecular_descriptors_ase_openbabel(atoms, positions=None):
+    """
+    Extract all molecular descriptors for ASE database conditioning
+    
+    Parameters
+    ----------
+    atoms : ase.Atoms
+        ASE atoms object
+    positions : torch.Tensor, optional
+        Alternative positions tensor (if different from atoms.positions)
+        
+    Returns
+    -------
+    descriptors : dict
+        Dictionary containing:
+        - 'atom_types': list of unique atomic symbols
+        - 'molecular_weight': molecular weight in u
+        - 'functional_groups': list of functional group names  
+        - 'pi_conjugation_ratio': ratio of π bonds to total bonds
+    """
+    descriptors = {
+        'atom_types': [],
+        'molecular_weight': 0.0,
+        'functional_groups': [],
+        'pi_conjugation_ratio': 0.0
+    }
+    
+    try:
+        # Extract atom types and molecular weight from ASE
+        descriptors['atom_types'] = extract_atom_types_from_ase(atoms)
+        descriptors['molecular_weight'] = extract_molecular_weight_from_ase(atoms)
+        
+        # For functional groups and π conjugation, we need OpenBabel
+        if OPENBABEL_AVAILABLE:
+            # Convert ASE to OpenBabel molecule
+            mol = ob.OBMol()
+            
+            # Add atoms
+            for i, (symbol, pos) in enumerate(zip(atoms.get_chemical_symbols(), atoms.positions)):
+                atom = mol.NewAtom()
+                atomic_num = ob.GetAtomicNum(symbol)
+                atom.SetAtomicNum(atomic_num)
+                atom.SetVector(float(pos[0]), float(pos[1]), float(pos[2]))
+            
+            # Try to perceive bonds
+            mol.ConnectTheDots()
+            mol.PerceiveBondOrders()
+            
+            # Extract functional groups and π conjugation ratio
+            descriptors['functional_groups'] = extract_functional_groups_openbabel(mol)
+            descriptors['pi_conjugation_ratio'] = extract_pi_conjugation_ratio_openbabel(mol)
+    
+    except Exception as e:
+        print(f"Warning: Failed to extract molecular descriptors: {e}")
+    
+    return descriptors
+
+
 # Helper function to check if OpenBabel is available
 def is_openbabel_available():
     return OPENBABEL_AVAILABLE

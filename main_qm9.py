@@ -99,7 +99,7 @@ parser.add_argument('--num_workers', type=int, default=0, help='Number of worker
 parser.add_argument('--test_epochs', type=int, default=10)
 parser.add_argument('--data_augmentation', type=eval, default=False, help='use attention in the EGNN')
 parser.add_argument("--conditioning", nargs='+', default=[],
-                    help='arguments : homo | lumo | alpha | gap | mu | Cv' )
+                    help='arguments : homo | lumo | alpha | gap | mu | Cv | molecular_weight | pi_conjugation_ratio | atom_types_encoding | functional_groups_encoding' )
 parser.add_argument('--resume', type=str, default=None,
                     help='')
 parser.add_argument('--start_epoch', type=int, default=0,

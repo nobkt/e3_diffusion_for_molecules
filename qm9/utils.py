@@ -6,6 +6,8 @@ def compute_mean_mad(dataloaders, properties, dataset_name):
         return compute_mean_mad_from_dataloader(dataloaders['train'], properties)
     elif dataset_name == 'qm9_second_half' or dataset_name == 'qm9_second_half':
         return compute_mean_mad_from_dataloader(dataloaders['valid'], properties)
+    elif dataset_name == 'ase_db':
+        return compute_mean_mad_from_dataloader(dataloaders['train'], properties)
     else:
         raise Exception('Wrong dataset name')
 
