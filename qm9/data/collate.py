@@ -47,11 +47,19 @@ def drop_zeros(props, to_keep):
     -----
     TODO : Review whether the behavior when elements are not tensors is safe.
     """
-    if not torch.is_tensor(props[0]):
+    if not torch.is_tensor(props):
         return props
-    elif props[0].dim() == 0:
+    elif props.dim() == 0:
+        return props
+    elif props.dim() == 1:
+        # 1D tensors (global properties) don't need atom masking
+        return props
+    elif props.dim() == 2 and props.size(1) != to_keep.size(0):
+        # 2D tensors that don't match the number of atoms (e.g., global features) 
+        # don't need atom masking
         return props
     else:
+        # Apply masking to position/charge-like tensors
         return props[:, to_keep, ...]
 
 
@@ -76,14 +84,25 @@ class PreprocessQM9:
         batch : dict of Pytorch tensors
             The collated data.
         """
-        batch = {prop: batch_stack([mol[prop] for mol in batch]) for prop in batch[0].keys()}
+        # Separate metadata keys (starting with '_') from data keys
+        data_keys = [key for key in batch[0].keys() if not key.startswith('_')]
+        metadata_keys = [key for key in batch[0].keys() if key.startswith('_')]
+        
+        # Collate only data keys
+        collated_batch = {prop: batch_stack([mol[prop] for mol in batch]) for prop in data_keys}
+        
+        # Add metadata keys without collating (they should be the same across all samples)
+        for key in metadata_keys:
+            collated_batch[key] = batch[0][key]  # Just take from first sample
 
-        to_keep = (batch['charges'].sum(0) > 0)
+        to_keep = (collated_batch['charges'].sum(0) > 0)
 
-        batch = {key: drop_zeros(prop, to_keep) for key, prop in batch.items()}
+        # Apply drop_zeros only to data keys, not metadata
+        for key in data_keys:
+            collated_batch[key] = drop_zeros(collated_batch[key], to_keep)
 
-        atom_mask = batch['charges'] > 0
-        batch['atom_mask'] = atom_mask
+        atom_mask = collated_batch['charges'] > 0
+        collated_batch['atom_mask'] = atom_mask
 
         #Obtain edges
         batch_size, n_nodes = atom_mask.size()
@@ -94,10 +113,10 @@ class PreprocessQM9:
         edge_mask *= diag_mask
 
         #edge_mask = atom_mask.unsqueeze(1) * atom_mask.unsqueeze(2)
-        batch['edge_mask'] = edge_mask.view(batch_size * n_nodes * n_nodes, 1)
+        collated_batch['edge_mask'] = edge_mask.view(batch_size * n_nodes * n_nodes, 1)
 
         if self.load_charges:
-            batch['charges'] = batch['charges'].unsqueeze(2)
+            collated_batch['charges'] = collated_batch['charges'].unsqueeze(2)
         else:
-            batch['charges'] = torch.zeros(0)
-        return batch
+            collated_batch['charges'] = torch.zeros(0)
+        return collated_batch

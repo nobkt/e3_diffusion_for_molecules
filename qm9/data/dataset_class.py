@@ -90,4 +90,12 @@ class ProcessedDataset(Dataset):
     def __getitem__(self, idx):
         if self.perm is not None:
             idx = self.perm[idx]
-        return {key: val[idx] for key, val in self.data.items()}
+        result = {}
+        for key, val in self.data.items():
+            if key.startswith('_'):
+                # Metadata keys - don't index, return as-is
+                result[key] = val
+            else:
+                # Regular data - index with idx
+                result[key] = val[idx]
+        return result

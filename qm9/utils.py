@@ -16,9 +16,23 @@ def compute_mean_mad_from_dataloader(dataloader, properties):
     property_norms = {}
     for property_key in properties:
         values = dataloader.dataset.data[property_key]
-        mean = torch.mean(values)
-        ma = torch.abs(values - mean)
-        mad = torch.mean(ma)
+        
+        # Handle multi-dimensional features by computing norms per feature dimension
+        if values.dim() > 1:
+            # For multi-dimensional features, compute mean and mad across the batch dimension (dim=0)
+            mean = torch.mean(values, dim=0)
+            ma = torch.abs(values - mean.unsqueeze(0))
+            mad = torch.mean(ma, dim=0)
+            # Add small epsilon to prevent division by zero
+            mad = torch.clamp(mad, min=1e-8)
+        else:
+            # For scalar features, use the original logic
+            mean = torch.mean(values)
+            ma = torch.abs(values - mean)
+            mad = torch.mean(ma)
+            # Add small epsilon to prevent division by zero when all values are the same
+            mad = torch.max(mad, torch.tensor(1e-8))
+        
         property_norms[property_key] = {}
         property_norms[property_key]['mean'] = mean
         property_norms[property_key]['mad'] = mad
@@ -62,25 +76,46 @@ def prepare_context(conditioning, minibatch, property_norms):
     context_list = []
     for key in conditioning:
         properties = minibatch[key]
-        properties = (properties - property_norms[key]['mean']) / property_norms[key]['mad']
+        
+        # Handle normalization for both scalar and multi-dimensional features
+        mean = property_norms[key]['mean']
+        mad = property_norms[key]['mad']
+        
+        # Apply normalization with proper broadcasting
+        if mean.dim() == 0:  # Scalar mean/mad
+            properties = (properties - mean) / mad
+        else:  # Multi-dimensional mean/mad
+            # Ensure proper broadcasting
+            if properties.dim() == 2 and mean.dim() == 1:
+                # properties: (batch_size, n_features), mean/mad: (n_features,)
+                properties = (properties - mean.unsqueeze(0)) / mad.unsqueeze(0)
+            else:
+                properties = (properties - mean) / mad
+        
         if len(properties.size()) == 1:
             # Global feature.
             assert properties.size() == (batch_size,)
             reshaped = properties.view(batch_size, 1, 1).repeat(1, n_nodes, 1)
             context_list.append(reshaped)
             context_node_nf += 1
-        elif len(properties.size()) == 2 or len(properties.size()) == 3:
-            # Node feature.
+        elif len(properties.size()) == 2:
+            # Could be node feature or global feature
+            if properties.size(1) == n_nodes:
+                # Node feature with shape (batch_size, n_nodes)
+                context_key = properties.unsqueeze(2)
+                context_list.append(context_key)
+                context_node_nf += 1
+            else:
+                # Global feature with shape (batch_size, n_features) - broadcast to all nodes
+                n_features = properties.size(1)
+                reshaped = properties.view(batch_size, 1, n_features).repeat(1, n_nodes, 1)
+                context_list.append(reshaped)
+                context_node_nf += n_features
+        elif len(properties.size()) == 3:
+            # Node feature with shape (batch_size, n_nodes, n_features)
             assert properties.size()[:2] == (batch_size, n_nodes)
-
-            context_key = properties
-
-            # Inflate if necessary.
-            if len(properties.size()) == 2:
-                context_key = context_key.unsqueeze(2)
-
-            context_list.append(context_key)
-            context_node_nf += context_key.size(2)
+            context_list.append(properties)
+            context_node_nf += properties.size(2)
         else:
             raise ValueError('Invalid tensor size, more than 3 axes.')
     # Concatenate

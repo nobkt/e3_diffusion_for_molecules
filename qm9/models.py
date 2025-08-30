@@ -14,7 +14,18 @@ def get_model(args, device, dataset_info, dataloader_train):
 
     prop_dist = None
     if len(args.conditioning) > 0:
-        prop_dist = DistributionProperty(dataloader_train, args.conditioning)
+        # Filter conditioning properties to only include scalar properties for distribution
+        scalar_properties = []
+        for prop in args.conditioning:
+            prop_tensor = dataloader_train.dataset.data[prop]
+            if prop_tensor.dim() == 1:  # Only scalar properties
+                scalar_properties.append(prop)
+        
+        if scalar_properties:
+            prop_dist = DistributionProperty(dataloader_train, scalar_properties)
+        else:
+            # If no scalar properties, create a dummy distribution
+            prop_dist = None
 
     if args.condition_time:
         dynamics_in_node_nf = in_node_nf + 1
