@@ -63,11 +63,17 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
     else:
         raise ValueError(f"Unsupported dataset: {args.dataset}. Supported datasets are: qm9, qm9_second_half, qm9_first_half, geom, ase_db")
 
-    # TODO FIX: This conditioning just zeros.
+    # Handle context creation with proper dimensions
     if args.context_node_nf > 0:
-        context = prop_dist.sample(n_nodes).unsqueeze(1).unsqueeze(0)
-        context = context.repeat(1, n_nodes, 1).to(device)
-        #context = torch.zeros(n_samples, n_nodes, args.context_node_nf).to(device)
+        # Create context tensor with correct dimensions for all conditioning features
+        context = torch.zeros(n_samples, n_nodes, args.context_node_nf).to(device)
+        
+        # If we have a property distribution for scalar features, use it
+        if prop_dist is not None:
+            scalar_context = prop_dist.sample(n_nodes).unsqueeze(0)
+            # Fill the beginning of context with scalar properties
+            scalar_dims = scalar_context.size(1)
+            context[:, :, :scalar_dims] = scalar_context.unsqueeze(1).repeat(1, n_nodes, 1)
     else:
         context = None
 
@@ -130,11 +136,26 @@ def sample(args, device, generative_model, dataset_info,
     edge_mask = edge_mask.view(batch_size * max_n_nodes * max_n_nodes, 1).to(device)
     node_mask = node_mask.unsqueeze(2).to(device)
 
-    # TODO FIX: This conditioning just zeros.
+    # Handle context creation with proper dimensions
     if args.context_node_nf > 0:
         if context is None:
-            context = prop_dist.sample_batch(nodesxsample)
-        context = context.unsqueeze(1).repeat(1, max_n_nodes, 1).to(device) * node_mask
+            # Create context tensor with correct dimensions for all conditioning features
+            context = torch.zeros(batch_size, max_n_nodes, args.context_node_nf).to(device)
+            
+            # If we have a property distribution for scalar features, use it
+            if prop_dist is not None:
+                scalar_context = prop_dist.sample_batch(nodesxsample)
+                # Fill the beginning of context with scalar properties
+                scalar_dims = scalar_context.size(1)
+                context[:, :, :scalar_dims] = scalar_context.unsqueeze(1).repeat(1, max_n_nodes, 1)
+            
+            # Apply node mask to context
+            context = context * node_mask
+        else:
+            # Use provided context, ensure it has the right shape
+            if context.dim() == 2:
+                context = context.unsqueeze(1).repeat(1, max_n_nodes, 1).to(device)
+            context = context.to(device) * node_mask
     else:
         context = None
 
