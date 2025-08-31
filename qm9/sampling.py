@@ -186,13 +186,38 @@ def sample_sweep_conditional(args, device, generative_model, dataset_info, prop_
     nodesxsample = torch.tensor([n_nodes] * n_frames)
 
     context = []
-    for key in prop_dist.distributions:
-        min_val, max_val = prop_dist.distributions[key][n_nodes]['params']
-        mean, mad = prop_dist.normalizer[key]['mean'], prop_dist.normalizer[key]['mad']
-        min_val = (min_val - mean) / (mad)
-        max_val = (max_val - mean) / (mad)
-        context_row = torch.tensor(np.linspace(min_val, max_val, n_frames)).unsqueeze(1)
-        context.append(context_row)
+    
+    # Handle all conditioning features to match training context shape
+    for key in args.conditioning:
+        if prop_dist is not None and key in prop_dist.distributions:
+            # Scalar property with distribution - create sweep
+            min_val, max_val = prop_dist.distributions[key][n_nodes]['params']
+            mean, mad = prop_dist.normalizer[key]['mean'], prop_dist.normalizer[key]['mad']
+            min_val = (min_val - mean) / (mad)
+            max_val = (max_val - mean) / (mad)
+            context_row = torch.tensor(np.linspace(min_val, max_val, n_frames)).unsqueeze(1)
+            context.append(context_row)
+        else:
+            # Multi-dimensional or non-scalar property - use mean/default values
+            if prop_dist is not None and hasattr(prop_dist, 'normalizer') and key in prop_dist.normalizer:
+                # Use normalized mean (zero after normalization)
+                mean = prop_dist.normalizer[key]['mean']
+                if hasattr(mean, 'dim') and mean.dim() == 0:
+                    # Scalar mean - create single feature column
+                    context_row = torch.zeros(n_frames, 1)
+                elif hasattr(mean, 'shape') and len(mean.shape) > 0:
+                    # Multi-dimensional mean - create multiple feature columns  
+                    n_features = mean.shape[0] if len(mean.shape) == 1 else mean.numel()
+                    context_row = torch.zeros(n_frames, n_features)
+                else:
+                    # Fallback for scalar-like means
+                    context_row = torch.zeros(n_frames, 1)
+                context.append(context_row)
+            else:
+                # No normalization info available - assume single feature with zero
+                context_row = torch.zeros(n_frames, 1)
+                context.append(context_row)
+    
     context = torch.cat(context, dim=1).float().to(device)
 
     one_hot, charges, x, node_mask = sample(args, device, generative_model, dataset_info, prop_dist, nodesxsample=nodesxsample, context=context, fix_noise=True)
