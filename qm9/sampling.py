@@ -195,7 +195,7 @@ def sample_sweep_conditional(args, device, generative_model, dataset_info, prop_
             mean, mad = prop_dist.normalizer[key]['mean'], prop_dist.normalizer[key]['mad']
             min_val = (min_val - mean) / (mad)
             max_val = (max_val - mean) / (mad)
-            context_row = torch.tensor(np.linspace(min_val, max_val, n_frames)).unsqueeze(1)
+            context_row = torch.from_numpy(np.linspace(float(min_val), float(max_val), n_frames).astype(np.float32)).unsqueeze(1)
             context.append(context_row)
         else:
             # Multi-dimensional or non-scalar property - use mean/default values
