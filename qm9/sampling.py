@@ -66,12 +66,14 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
     # Handle context creation with proper dimensions
     if args.context_node_nf > 0:
         # Create context tensor with correct dimensions for all conditioning features
+        # This ensures compatibility with both scalar and multi-dimensional features
         context = torch.zeros(n_samples, n_nodes, args.context_node_nf).to(device)
         
-        # If we have a property distribution for scalar features, use it
+        # If we have a property distribution for scalar features, use it to fill the context
         if prop_dist is not None:
             scalar_context = prop_dist.sample(n_nodes).unsqueeze(0)
             # Fill the beginning of context with scalar properties
+            # Non-scalar features (like atom_types_encoding) remain as zeros during sampling
             scalar_dims = scalar_context.size(1)
             context[:, :, :scalar_dims] = scalar_context.unsqueeze(1).repeat(1, n_nodes, 1)
     else:
@@ -140,12 +142,14 @@ def sample(args, device, generative_model, dataset_info,
     if args.context_node_nf > 0:
         if context is None:
             # Create context tensor with correct dimensions for all conditioning features
+            # This ensures compatibility with both scalar and multi-dimensional features
             context = torch.zeros(batch_size, max_n_nodes, args.context_node_nf).to(device)
             
-            # If we have a property distribution for scalar features, use it
+            # If we have a property distribution for scalar features, use it to fill the context
             if prop_dist is not None:
                 scalar_context = prop_dist.sample_batch(nodesxsample)
                 # Fill the beginning of context with scalar properties
+                # Non-scalar features (like atom_types_encoding) remain as zeros during sampling
                 scalar_dims = scalar_context.size(1)
                 context[:, :, :scalar_dims] = scalar_context.unsqueeze(1).repeat(1, max_n_nodes, 1)
             
