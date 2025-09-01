@@ -28,7 +28,8 @@ def get_classifier(dir_path='', device='cpu'):
 def get_args_gen(dir_path):
     with open(join(dir_path, 'args.pickle'), 'rb') as f:
         args_gen = pickle.load(f)
-    assert args_gen.dataset == 'qm9_second_half'
+    # Support both qm9_second_half and ase_db datasets
+    assert args_gen.dataset in ['qm9_second_half', 'ase_db'], f"Unsupported dataset: {args_gen.dataset}"
 
     # Add missing args!
     if not hasattr(args_gen, 'normalization_factor'):
@@ -59,7 +60,7 @@ def get_dataloader(args_gen):
 
 class DiffusionDataloader:
     def __init__(self, args_gen, model, nodes_dist, prop_dist, device, unkown_labels=False,
-                 batch_size=1, iterations=200):
+                 batch_size=1, iterations=200, property_key=None):
         self.args_gen = args_gen
         self.model = model
         self.nodes_dist = nodes_dist
@@ -70,6 +71,8 @@ class DiffusionDataloader:
         self.unkown_labels = unkown_labels
         self.dataset_info = get_dataset_info(self.args_gen.dataset, self.args_gen.remove_h)
         self.i = 0
+        # Use the specified property, or fall back to the first one
+        self.property_key = property_key if property_key is not None else (self.prop_dist.properties[0] if self.prop_dist else None)
 
     def __iter__(self):
         return self
@@ -92,7 +95,7 @@ class DiffusionDataloader:
         edge_mask *= diag_mask
         edge_mask = edge_mask.view(bs * n_nodes * n_nodes, 1)
 
-        prop_key = self.prop_dist.properties[0]
+        prop_key = self.property_key
         if self.unkown_labels:
             context[:] = self.prop_dist.normalizer[prop_key]['mean']
         else:
@@ -142,21 +145,26 @@ def main_quantitative(args):
     model, nodes_dist, prop_dist, _ = get_generator(args.generators_path, dataloaders,
                                                     args.device, args_gen, property_norms)
 
+    # Verify that the requested property was part of the conditioning during training
+    if args.property not in args_gen.conditioning:
+        raise ValueError(f"Property '{args.property}' was not used for conditioning during training. "
+                        f"Available conditioning properties: {args_gen.conditioning}")
+
     # Create a dataloader with the generator
 
     mean, mad = property_norms[args.property]['mean'], property_norms[args.property]['mad']
 
     if args.task == 'edm':
         diffusion_dataloader = DiffusionDataloader(args_gen, model, nodes_dist, prop_dist,
-                                                   args.device, batch_size=args.batch_size, iterations=args.iterations)
+                                                   args.device, batch_size=args.batch_size, iterations=args.iterations, property_key=args.property)
         print("EDM: We evaluate the classifier on our generated samples")
         loss = test(classifier, 0, diffusion_dataloader, mean, mad, args.property, args.device, 1, args.debug_break)
         print("Loss classifier on Generated samples: %.4f" % loss)
     elif args.task == 'qm9_second_half':
-        print("qm9_second_half: We evaluate the classifier on QM9")
+        print(f"{args_gen.dataset}: We evaluate the classifier on the training dataset")
         loss = test(classifier, 0, dataloaders['train'], mean, mad, args.property, args.device, args.log_interval,
                     args.debug_break)
-        print("Loss classifier on qm9_second_half: %.4f" % loss)
+        print(f"Loss classifier on {args_gen.dataset}: %.4f" % loss)
     elif args.task == 'naive':
         print("Naive: We evaluate the classifier on QM9")
         length = dataloaders['train'].dataset.data[args.property].size(0)
@@ -205,7 +213,7 @@ if __name__ == "__main__":
     parser.add_argument('--generators_path', type=str, default='outputs/exp_cond_alpha_pretrained')
     parser.add_argument('--classifiers_path', type=str, default='qm9/property_prediction/outputs/exp_class_alpha_pretrained')
     parser.add_argument('--property', type=str, default='alpha',
-                        help="'alpha', 'homo', 'lumo', 'gap', 'mu', 'Cv'")
+                        help="'alpha', 'homo', 'lumo', 'gap', 'mu', 'Cv', 'molecular_weight', 'pi_conjugation_ratio', 'atom_types_encoding', 'functional_groups_encoding'")
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='enables CUDA training')
     parser.add_argument('--debug_break', type=eval, default=False,

@@ -143,7 +143,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_layers', type=int, default=7, metavar='N',
                         help='number of layers for the autoencoder')
     parser.add_argument('--property', type=str, default='alpha', metavar='N',
-                        help='label to predict: alpha | gap | homo | lumo | mu | Cv | G | H | r2 | U | U0 | zpve')
+                        help='label to predict: alpha | gap | homo | lumo | mu | Cv | G | H | r2 | U | U0 | zpve | molecular_weight | pi_conjugation_ratio | atom_types_encoding | functional_groups_encoding')
     parser.add_argument('--num_workers', type=int, default=0, metavar='N',
                         help='number of workers for the dataloader')
     parser.add_argument('--filter_n_atoms', type=int, default=None,
@@ -151,9 +151,11 @@ if __name__ == "__main__":
     parser.add_argument('--charge_power', type=int, default=2, metavar='N',
                         help='maximum power to take into one-hot features')
     parser.add_argument('--dataset', type=str, default="qm9_first_half", metavar='N',
-                        help='qm9_first_half')
+                        help='qm9_first_half | qm9_second_half | ase_db')
     parser.add_argument('--datadir', type=str, default="../../qm9/temp", metavar='N',
                         help='qm9_first_half')
+    parser.add_argument('--ase_db_path', type=str, default=None, metavar='N',
+                        help='Path to ASE database file when using dataset=ase_db')
     parser.add_argument('--remove_h', action='store_true')
     parser.add_argument('--include_charges', type=eval, default=True, help='include atom charge or not')
     parser.add_argument('--node_attr', type=int, default=0, metavar='N',
