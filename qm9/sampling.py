@@ -182,6 +182,29 @@ def sample(args, device, generative_model, dataset_info,
     return one_hot, charges, x, node_mask
 
 
+def sample_exact_conditional(args, device, generative_model, dataset_info, prop_dist, exact_context, n_nodes=19, n_frames=100):
+    """
+    Sample molecules with exact conditional values instead of sweeps.
+    
+    Args:
+        args: Model arguments
+        device: Device to run on
+        generative_model: Trained generative model
+        dataset_info: Dataset information
+        prop_dist: Property distribution (can be None for exact conditioning)
+        exact_context: Pre-computed context tensor with exact conditions
+        n_nodes: Number of nodes per molecule
+        n_frames: Number of molecules to generate
+        
+    Returns:
+        tuple: (one_hot, charges, x, node_mask) - Generated molecules
+    """
+    nodesxsample = torch.tensor([n_nodes] * n_frames)
+
+    one_hot, charges, x, node_mask = sample(args, device, generative_model, dataset_info, prop_dist, nodesxsample=nodesxsample, context=exact_context, fix_noise=True)
+    return one_hot, charges, x, node_mask
+
+
 def sample_sweep_conditional(args, device, generative_model, dataset_info, prop_dist, n_nodes=19, n_frames=100):
     nodesxsample = torch.tensor([n_nodes] * n_frames)
 

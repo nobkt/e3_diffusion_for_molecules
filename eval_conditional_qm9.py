@@ -9,8 +9,10 @@ from qm9.utils import compute_mean_mad
 from qm9.sampling import sample
 from qm9.property_prediction.main_qm9_prop import test
 from qm9.property_prediction import main_qm9_prop
-from qm9.sampling import sample_chain, sample, sample_sweep_conditional
+from qm9.sampling import sample_chain, sample, sample_sweep_conditional, sample_exact_conditional
 import qm9.visualizer as vis
+import ast
+import re
 
 
 def get_classifier(dir_path='', device='cpu'):
@@ -23,6 +25,199 @@ def get_classifier(dir_path='', device='cpu'):
     classifier.load_state_dict(classifier_state_dict)
 
     return classifier
+
+
+def parse_property_values(property_values_str):
+    """
+    Parse property values string into a dictionary of property names and values.
+    
+    Format: 'molecular_weight=50.0,pi_conjugation_ratio=0.9,atom_types_encoding=[C,H,N,O],functional_groups_encoding=[[CX3](=O)[OX2H1],[NX3;H2,H1;!$(NC=O)]]'
+    
+    Returns:
+        dict: Dictionary with property names as keys and parsed values
+    """
+    if not property_values_str:
+        return {}
+    
+    parsed_values = {}
+    
+    # Split by commas, but be careful with nested brackets
+    # Use a more sophisticated parsing approach
+    current_prop = ""
+    bracket_depth = 0
+    paren_depth = 0
+    
+    for char in property_values_str + ',':  # Add comma at end to process last item
+        if char == '[':
+            bracket_depth += 1
+        elif char == ']':
+            bracket_depth -= 1
+        elif char == '(':
+            paren_depth += 1
+        elif char == ')':
+            paren_depth -= 1
+        elif char == ',' and bracket_depth == 0 and paren_depth == 0:
+            # Process current property
+            if current_prop.strip():
+                prop_name, prop_value = current_prop.split('=', 1)
+                prop_name = prop_name.strip()
+                prop_value = prop_value.strip()
+                
+                # Parse the value based on its format
+                parsed_values[prop_name] = parse_single_property_value(prop_value)
+            current_prop = ""
+            continue
+        
+        current_prop += char
+    
+    return parsed_values
+
+
+def parse_single_property_value(value_str):
+    """
+    Parse a single property value string into appropriate Python type.
+    
+    Args:
+        value_str: String representation of the value
+        
+    Returns:
+        Parsed value (float, list, etc.)
+    """
+    value_str = value_str.strip()
+    
+    # Try to parse as float first
+    try:
+        return float(value_str)
+    except ValueError:
+        pass
+    
+    # Try to parse as list
+    if value_str.startswith('[') and value_str.endswith(']'):
+        try:
+            # Handle atom types like [C,H,N,O]
+            if ',' in value_str and not '(' in value_str:
+                # Simple list of atoms
+                content = value_str[1:-1]  # Remove brackets
+                items = [item.strip() for item in content.split(',')]
+                return items
+            else:
+                # More complex list, try literal_eval
+                return ast.literal_eval(value_str)
+        except (ValueError, SyntaxError):
+            # If parsing fails, return as string
+            return value_str
+    
+    # Return as string if no other parsing worked
+    return value_str
+
+
+def create_exact_context(property_values, args_gen, property_norms, n_frames, n_nodes, device):
+    """
+    Create context tensor with exact property values instead of sweeps.
+    
+    Args:
+        property_values: Dictionary of property names and exact values
+        args_gen: Generator arguments with conditioning information
+        property_norms: Property normalization parameters
+        n_frames: Number of frames to generate
+        n_nodes: Number of nodes per molecule
+        device: Device to create tensors on
+        
+    Returns:
+        torch.Tensor: Context tensor with exact conditions repeated for all frames
+    """
+    import numpy as np
+    from configs.datasets_config import get_dataset_info
+    
+    context_list = []
+    
+    # Handle all conditioning features to match training context shape
+    for key in args_gen.conditioning:
+        if key in property_values:
+            # We have an exact value for this property
+            exact_value = property_values[key]
+            
+            if isinstance(exact_value, (int, float)):
+                # Scalar property - normalize and create tensor
+                if key in property_norms:
+                    mean = property_norms[key]['mean']
+                    mad = property_norms[key]['mad']
+                    normalized_value = (exact_value - mean) / mad
+                else:
+                    normalized_value = exact_value
+                
+                context_row = torch.full((n_frames, 1), normalized_value, dtype=torch.float32)
+                context_list.append(context_row)
+                
+            elif isinstance(exact_value, list):
+                # Handle multi-dimensional properties like atom_types_encoding
+                if key == 'atom_types_encoding':
+                    # Convert atom symbols to encoding
+                    dataset_info = get_dataset_info(args_gen.dataset, args_gen.remove_h)
+                    atom_encoder = dataset_info.get('atom_encoder', {})
+                    
+                    # Create binary encoding for specified atom types
+                    n_atom_types = len(atom_encoder)
+                    encoding = torch.zeros(n_atom_types, dtype=torch.float32)
+                    
+                    for atom_symbol in exact_value:
+                        if atom_symbol in atom_encoder:
+                            encoding[atom_encoder[atom_symbol]] = 1.0
+                    
+                    # Repeat for all frames
+                    context_row = encoding.unsqueeze(0).repeat(n_frames, 1)
+                    context_list.append(context_row)
+                    
+                elif key == 'functional_groups_encoding':
+                    # Handle functional groups encoding
+                    # For now, create a simple binary encoding based on presence
+                    # This would need to be matched with the training data encoding
+                    n_functional_groups = 16  # Common number of functional groups
+                    encoding = torch.zeros(n_functional_groups, dtype=torch.float32)
+                    
+                    # Simple hashing of functional group names to indices
+                    for i, fg in enumerate(exact_value[:n_functional_groups]):
+                        encoding[i] = 1.0
+                    
+                    context_row = encoding.unsqueeze(0).repeat(n_frames, 1)
+                    context_list.append(context_row)
+                    
+                else:
+                    # Generic list handling
+                    list_tensor = torch.tensor(exact_value, dtype=torch.float32)
+                    context_row = list_tensor.unsqueeze(0).repeat(n_frames, 1)
+                    context_list.append(context_row)
+            else:
+                # Fallback for other types
+                context_row = torch.zeros(n_frames, 1, dtype=torch.float32)
+                context_list.append(context_row)
+        else:
+            # No exact value specified, use default (mean/zero)
+            if key in property_norms:
+                # Use normalized mean (zero after normalization for most properties)
+                mean = property_norms[key]['mean']
+                if hasattr(mean, 'dim') and mean.dim() == 0:
+                    # Scalar mean
+                    context_row = torch.zeros(n_frames, 1, dtype=torch.float32)
+                elif hasattr(mean, 'shape') and len(mean.shape) > 0:
+                    # Multi-dimensional mean
+                    n_features = mean.shape[0] if len(mean.shape) == 1 else mean.numel()
+                    context_row = torch.zeros(n_frames, n_features, dtype=torch.float32)
+                else:
+                    # Fallback for scalar-like means
+                    context_row = torch.zeros(n_frames, 1, dtype=torch.float32)
+            else:
+                # No normalization info available
+                context_row = torch.zeros(n_frames, 1, dtype=torch.float32)
+            
+            context_list.append(context_row)
+    
+    if context_list:
+        context = torch.cat(context_list, dim=1).float().to(device)
+    else:
+        context = None
+    
+    return context
 
 
 def get_args_gen(dir_path):
@@ -181,8 +376,26 @@ def main_quantitative(args):
     #    print("Loss numnodes classifier on EDM generated samples: %.4f" % loss)
 
 
-def save_and_sample_conditional(args, device, model, prop_dist, dataset_info, epoch=0, id_from=0):
-    one_hot, charges, x, node_mask = sample_sweep_conditional(args, device, model, dataset_info, prop_dist)
+def save_and_sample_conditional(args, device, model, prop_dist, dataset_info, epoch=0, id_from=0, exact_context=None):
+    """
+    Sample and save conditional molecules.
+    
+    Args:
+        args: Arguments with conditioning information
+        device: Device to run on  
+        model: Trained generative model
+        prop_dist: Property distribution
+        dataset_info: Dataset information
+        epoch: Epoch number for naming
+        id_from: Starting ID for naming
+        exact_context: If provided, use exact conditions instead of sweep
+    """
+    if exact_context is not None:
+        # Use exact conditional sampling
+        one_hot, charges, x, node_mask = sample_exact_conditional(args, device, model, dataset_info, prop_dist, exact_context)
+    else:
+        # Use sweep conditional sampling (original behavior)
+        one_hot, charges, x, node_mask = sample_sweep_conditional(args, device, model, dataset_info, prop_dist)
 
     vis.save_xyz_file(
         'outputs/%s/analysis/run%s/' % (args.exp_name, epoch), one_hot, charges, x, dataset_info,
@@ -202,9 +415,28 @@ def main_qualitative(args):
                                                                dataloaders, args.device, args_gen,
                                                                property_norms)
 
+    # Parse exact property values if provided
+    exact_context = None
+    if args.use_exact_conditions and args.property_values:
+        property_values = parse_property_values(args.property_values)
+        print(f"Using exact conditions: {property_values}")
+        
+        # Create exact context tensor
+        n_frames = 100  # Default number of molecules to generate
+        n_nodes = 19    # Default number of nodes (can be made configurable)
+        exact_context = create_exact_context(property_values, args_gen, property_norms, 
+                                            n_frames, n_nodes, args.device)
+        
+        print(f"Created exact context tensor with shape: {exact_context.shape if exact_context is not None else None}")
+
     for i in range(args.n_sweeps):
         print("Sampling sweep %d/%d" % (i+1, args.n_sweeps))
-        save_and_sample_conditional(args_gen, device, model, prop_dist, dataset_info, epoch=i, id_from=0)
+        if exact_context is not None:
+            print("  Using exact conditional sampling")
+        else:
+            print("  Using sweep conditional sampling")
+        save_and_sample_conditional(args_gen, args.device, model, prop_dist, dataset_info, 
+                                   epoch=i, id_from=0, exact_context=exact_context)
 
 
 if __name__ == "__main__":
@@ -214,6 +446,10 @@ if __name__ == "__main__":
     parser.add_argument('--classifiers_path', type=str, default='qm9/property_prediction/outputs/exp_class_alpha_pretrained')
     parser.add_argument('--property', type=str, default='alpha',
                         help="'alpha', 'homo', 'lumo', 'gap', 'mu', 'Cv', 'molecular_weight', 'pi_conjugation_ratio', 'atom_types_encoding', 'functional_groups_encoding'")
+    parser.add_argument('--property_values', type=str, default=None,
+                        help="Specify exact property values as key=value pairs, e.g., 'molecular_weight=50.0,pi_conjugation_ratio=0.9,atom_types_encoding=[C,H,N,O]'")
+    parser.add_argument('--use_exact_conditions', action='store_true',
+                        help='Use exact property values instead of property sweeps for generation')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='enables CUDA training')
     parser.add_argument('--debug_break', type=eval, default=False,
