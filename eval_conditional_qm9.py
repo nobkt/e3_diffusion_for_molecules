@@ -113,7 +113,7 @@ def parse_single_property_value(value_str):
 
 def create_exact_context(property_values, args_gen, property_norms, n_frames, n_nodes, device):
     """
-    Create context tensor with exact property values instead of sweeps.
+    Create context tensor with exact property values that matches the model's expected dimensions.
     
     Args:
         property_values: Dictionary of property names and exact values
@@ -127,96 +127,114 @@ def create_exact_context(property_values, args_gen, property_norms, n_frames, n_
         torch.Tensor: Context tensor with exact conditions repeated for all frames
     """
     import numpy as np
-    from configs.datasets_config import get_dataset_info
     
-    context_list = []
+    # Check if model expects any context at all
+    if not hasattr(args_gen, 'context_node_nf') or args_gen.context_node_nf == 0:
+        return None
     
-    # Handle all conditioning features to match training context shape
+    expected_context_features = args_gen.context_node_nf
+    
+    # Create a context tensor with the exact expected dimensions
+    # Initialize with zeros (normalized mean for most properties)
+    context = torch.zeros(n_frames, expected_context_features, dtype=torch.float32, device=device)
+    
+    # Fill in the context features based on available exact values
+    # We need to match the order and dimensions used during training
+    feature_idx = 0
+    
     for key in args_gen.conditioning:
-        if key in property_values:
-            # We have an exact value for this property
+        if feature_idx >= expected_context_features:
+            break
+            
+        if key in property_values and key in property_norms:
             exact_value = property_values[key]
             
             if isinstance(exact_value, (int, float)):
-                # Scalar property - normalize and create tensor
-                if key in property_norms:
-                    mean = property_norms[key]['mean']
-                    mad = property_norms[key]['mad']
-                    normalized_value = (exact_value - mean) / mad
-                else:
-                    normalized_value = exact_value
-                
-                context_row = torch.full((n_frames, 1), normalized_value, dtype=torch.float32)
-                context_list.append(context_row)
-                
-            elif isinstance(exact_value, list):
-                # Handle multi-dimensional properties like atom_types_encoding
-                if key == 'atom_types_encoding':
-                    # Convert atom symbols to encoding
-                    dataset_info = get_dataset_info(args_gen.dataset, args_gen.remove_h)
-                    atom_encoder = dataset_info.get('atom_encoder', {})
-                    
-                    # Create binary encoding for specified atom types
-                    n_atom_types = len(atom_encoder)
-                    encoding = torch.zeros(n_atom_types, dtype=torch.float32)
-                    
-                    for atom_symbol in exact_value:
-                        if atom_symbol in atom_encoder:
-                            encoding[atom_encoder[atom_symbol]] = 1.0
-                    
-                    # Repeat for all frames
-                    context_row = encoding.unsqueeze(0).repeat(n_frames, 1)
-                    context_list.append(context_row)
-                    
-                elif key == 'functional_groups_encoding':
-                    # Handle functional groups encoding
-                    # For now, create a simple binary encoding based on presence
-                    # This would need to be matched with the training data encoding
-                    n_functional_groups = 16  # Common number of functional groups
-                    encoding = torch.zeros(n_functional_groups, dtype=torch.float32)
-                    
-                    # Simple hashing of functional group names to indices
-                    for i, fg in enumerate(exact_value[:n_functional_groups]):
-                        encoding[i] = 1.0
-                    
-                    context_row = encoding.unsqueeze(0).repeat(n_frames, 1)
-                    context_list.append(context_row)
-                    
-                else:
-                    # Generic list handling
-                    list_tensor = torch.tensor(exact_value, dtype=torch.float32)
-                    context_row = list_tensor.unsqueeze(0).repeat(n_frames, 1)
-                    context_list.append(context_row)
-            else:
-                # Fallback for other types
-                context_row = torch.zeros(n_frames, 1, dtype=torch.float32)
-                context_list.append(context_row)
-        else:
-            # No exact value specified, use default (mean/zero)
-            if key in property_norms:
-                # Use normalized mean (zero after normalization for most properties)
+                # Scalar property - normalize and set
                 mean = property_norms[key]['mean']
-                if hasattr(mean, 'dim') and mean.dim() == 0:
-                    # Scalar mean
-                    context_row = torch.zeros(n_frames, 1, dtype=torch.float32)
-                elif hasattr(mean, 'shape') and len(mean.shape) > 0:
-                    # Multi-dimensional mean
-                    n_features = mean.shape[0] if len(mean.shape) == 1 else mean.numel()
-                    context_row = torch.zeros(n_frames, n_features, dtype=torch.float32)
+                mad = property_norms[key]['mad']
+                
+                # Handle tensor means/mads
+                if hasattr(mean, 'item'):
+                    mean = mean.item()
+                if hasattr(mad, 'item'):
+                    mad = mad.item()
+                    
+                normalized_value = (exact_value - mean) / mad
+                context[:, feature_idx] = normalized_value
+                feature_idx += 1
+                
+            elif isinstance(exact_value, list) and key == 'atom_types_encoding':
+                # For atom types, we might use a simpler encoding that fits the expected dimensions
+                # If we have multiple atom types, we might encode them as a single feature
+                # or use only the first few features
+                from configs.datasets_config import get_dataset_info
+                dataset_info = get_dataset_info(args_gen.dataset, args_gen.remove_h)
+                atom_encoder = dataset_info.get('atom_encoder', {})
+                
+                # Determine how many features this property should use
+                mean = property_norms[key]['mean']
+                if hasattr(mean, 'numel'):
+                    n_features = mean.numel()
+                elif hasattr(mean, 'shape'):
+                    n_features = mean.shape[0] if len(mean.shape) == 1 else 1
                 else:
-                    # Fallback for scalar-like means
-                    context_row = torch.zeros(n_frames, 1, dtype=torch.float32)
+                    n_features = 1
+                
+                # Don't exceed the expected context size
+                n_features = min(n_features, expected_context_features - feature_idx)
+                
+                if n_features > 0:
+                    # Create encoding that fits the expected dimensions
+                    encoding = torch.zeros(n_features, dtype=torch.float32)
+                    
+                    # Simple encoding: set first len(exact_value) features to 1
+                    for i, atom_symbol in enumerate(exact_value[:n_features]):
+                        if atom_symbol in atom_encoder:
+                            encoding[i] = 1.0
+                    
+                    # Apply normalization if available
+                    mean_tensor = property_norms[key]['mean']
+                    mad_tensor = property_norms[key]['mad']
+                    
+                    if hasattr(mean_tensor, 'shape') and len(mean_tensor.shape) > 0:
+                        mean_vals = mean_tensor[:n_features] if len(mean_tensor) >= n_features else mean_tensor
+                        mad_vals = mad_tensor[:n_features] if len(mad_tensor) >= n_features else mad_tensor
+                        encoding = (encoding - mean_vals) / mad_vals
+                    
+                    context[:, feature_idx:feature_idx + n_features] = encoding.unsqueeze(0).repeat(n_frames, 1)
+                    feature_idx += n_features
+                    
             else:
-                # No normalization info available
-                context_row = torch.zeros(n_frames, 1, dtype=torch.float32)
+                # For other properties, use default normalized values (usually zero)
+                mean = property_norms[key]['mean']
+                if hasattr(mean, 'numel'):
+                    n_features = min(mean.numel(), expected_context_features - feature_idx)
+                elif hasattr(mean, 'shape') and len(mean.shape) > 0:
+                    n_features = min(mean.shape[0], expected_context_features - feature_idx)
+                else:
+                    n_features = min(1, expected_context_features - feature_idx)
+                
+                # Keep default zeros (which represent normalized means)
+                feature_idx += n_features
+        else:
+            # Property not in exact values or property_norms - use defaults
+            # Determine expected feature count for this property
+            if key in property_norms:
+                mean = property_norms[key]['mean']
+                if hasattr(mean, 'numel'):
+                    n_features = min(mean.numel(), expected_context_features - feature_idx)
+                elif hasattr(mean, 'shape') and len(mean.shape) > 0:
+                    n_features = min(mean.shape[0], expected_context_features - feature_idx)
+                else:
+                    n_features = min(1, expected_context_features - feature_idx)
+            else:
+                n_features = min(1, expected_context_features - feature_idx)
             
-            context_list.append(context_row)
+            # Keep default zeros
+            feature_idx += n_features
     
-    if context_list:
-        context = torch.cat(context_list, dim=1).float().to(device)
-    else:
-        context = None
-    
+    print(f"Created context with shape {context.shape}, expected {expected_context_features} features per frame")
     return context
 
 
