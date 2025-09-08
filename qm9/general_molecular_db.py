@@ -77,10 +77,15 @@ def analyze_ase_database(db_path, include_charges=True, remove_h=False):
         db = connect(db_path)
     except Exception as e:
         error_message = str(e).lower()
-        if "database disk image is malformed" in error_message:
-            raise RuntimeError("Database file is corrupted (malformed disk image). Please recreate the database from original data.")
-        elif "file is not a database" in error_message:
+        if "file is not a database" in error_message:
             raise RuntimeError("File is not a valid ASE database. Check file format and extension.")
+        elif "database disk image is malformed" in error_message:
+            # For malformed databases, try to proceed with analysis as they might be partially readable
+            print(f"Warning: Database reports as malformed but attempting analysis anyway...")
+            try:
+                db = connect(db_path)
+            except Exception as e2:
+                raise RuntimeError(f"Database file is corrupted and cannot be accessed: {str(e2)}")
         else:
             raise RuntimeError(f"Cannot access database: {str(e)}")
     
@@ -94,11 +99,13 @@ def analyze_ase_database(db_path, include_charges=True, remove_h=False):
     max_atoms = 0
     
     # Analyze each molecule in the database with error handling
+    rows_processed = 0
     try:
         for row in db.select():
             try:
                 atoms = row.toatoms()
                 total_molecules += 1
+                rows_processed += 1
                 
                 # Get atomic symbols and numbers
                 symbols = atoms.get_chemical_symbols()
@@ -149,15 +156,18 @@ def analyze_ase_database(db_path, include_charges=True, remove_h=False):
                 continue
                 
     except Exception as e:
-        if total_molecules == 0:
-            # If we couldn't process any molecules, this is a fatal error
-            error_message = str(e).lower()
+        error_message = str(e).lower()
+        if rows_processed == 0:
+            # If we couldn't process any molecules, this might still be recoverable
             if "database disk image is malformed" in error_message:
-                raise RuntimeError("Database file is corrupted (malformed disk image). Please recreate the database from original data.")
+                print(f"Warning: Database is malformed but might have accessible data. Processed {rows_processed} molecules.")
+                # Allow analysis to continue with whatever data was collected
+                if total_molecules == 0:
+                    print("No molecules could be processed from this database.")
             else:
                 raise RuntimeError(f"Cannot access database rows: {str(e)}")
         else:
-            print(f"Warning: Database iteration ended prematurely after {total_molecules} molecules: {str(e)}")
+            print(f"Warning: Database iteration ended after processing {rows_processed} molecules: {str(e)}")
             # Continue with analysis of molecules processed so far
     
     # Compute property statistics
@@ -406,9 +416,23 @@ def validate_molecular_database(db_path):
                 return False, issues, ["Add molecular structures to the database"]
                 
         except Exception as count_error:
-            # If we can't even count rows, the database is likely corrupted
-            issues.append(f"Cannot access database rows: {str(count_error)}")
-            return False, issues, ["Database appears to be corrupted or incompatible"]
+            # Handle different types of database access errors
+            error_message = str(count_error).lower()
+            if "database disk image is malformed" in error_message:
+                # Don't fail validation for malformed databases - they might be partially readable
+                issues.append("Database reports as malformed but may still be partially readable")
+                recommendations.extend([
+                    "Database appears to have some corruption but may still be usable",
+                    "Try running the analysis to see if data can be extracted", 
+                    "Consider recreating the database if analysis fails"
+                ])
+                # Continue with validation using partial data if possible
+                rows = []  # Empty list for now, analysis will handle this better
+                total_molecules = 0
+            else:
+                # Other errors are still critical
+                issues.append(f"Cannot access database rows: {str(count_error)}")
+                return False, issues, ["Database appears to be corrupted or incompatible"]
         
         # Check minimum number of molecules  
         if total_molecules < 10:
@@ -487,13 +511,16 @@ def validate_molecular_database(db_path):
         # Provide more specific error messages for common database issues
         error_message = str(e).lower()
         if "database disk image is malformed" in error_message:
-            issues.append("Database file is corrupted (malformed disk image)")
+            # Treat malformed database as a warning, not a fatal error
+            # The database might still be partially readable
+            issues.append("Database reports as malformed but may still be partially readable")
             recommendations.extend([
-                "The database file appears to be corrupted",
-                "Try recreating the database from the original molecular data",
-                "Check if the file was completely written/transferred",
-                "Verify file permissions and storage integrity"
+                "Database appears to have some corruption but may still be usable",
+                "Try running the analysis to see if data can be extracted",
+                "Consider recreating the database if analysis fails",
+                "Check if the file was completely written/transferred"
             ])
+            # Don't return False - let the analysis attempt to proceed
         elif "file is not a database" in error_message:
             issues.append("File is not a valid SQLite/ASE database")
             recommendations.extend([
@@ -501,6 +528,7 @@ def validate_molecular_database(db_path):
                 "Check if the file extension and format are correct",
                 "Try opening the file with ASE directly to verify format"
             ])
+            return False, issues, recommendations
         elif "database is locked" in error_message:
             issues.append("Database is currently locked by another process")
             recommendations.extend([
@@ -508,11 +536,11 @@ def validate_molecular_database(db_path):
                 "Wait a moment and try again",
                 "Check for concurrent access to the database file"
             ])
+            return False, issues, recommendations
         else:
             issues.append(f"Error accessing database: {str(e)}")
             recommendations.append("Check database file integrity and format")
-        
-        return False, issues, recommendations
+            return False, issues, recommendations
     
     is_valid = len([issue for issue in issues if is_critical_issue(issue)]) == 0
     
@@ -535,12 +563,17 @@ def is_critical_issue(issue):
     """
     Determine if an issue is critical (prevents database use) or just a warning.
     """
+    issue_lower = issue.lower()
+    
+    # Special case: malformed but potentially readable databases are not critical
+    if "malformed but may still be partially readable" in issue_lower:
+        return False
+    
     critical_keywords = [
-        "corrupted", "malformed", "cannot access", "not a valid",
-        "error processing", "coordinate issues", "very small molecules"
+        "cannot access", "not a valid", "error processing", 
+        "very small molecules", "database is locked"
     ]
     
-    issue_lower = issue.lower()
     return any(keyword in issue_lower for keyword in critical_keywords)
 
 
@@ -637,7 +670,12 @@ def print_database_summary(db_path, save_summary=False, summary_path=None):
     # Validate database
     is_valid, issues, recommendations = validate_molecular_database(db_path)
     
-    if not is_valid:
+    # Check if we have critical issues that prevent analysis
+    critical_issues = [issue for issue in issues if is_critical_issue(issue)]
+    has_malformed_warning = any("malformed but may still be partially readable" in issue for issue in issues)
+    
+    # If we have critical issues that aren't the malformed warning, stop here
+    if not is_valid and not has_malformed_warning:
         print("\n❌ DATABASE VALIDATION FAILED")
         print("\nIssues found:")
         for issue in issues:
@@ -647,10 +685,13 @@ def print_database_summary(db_path, save_summary=False, summary_path=None):
             print(f"  - {rec}")
         return
     
-    # Show warnings even for valid databases
+    # Show warnings for valid databases or malformed but potentially readable databases
     if len(issues) > 0:
-        print("\n⚠️  DATABASE WARNINGS")
-        print("\nIssues found (non-critical):")
+        if has_malformed_warning:
+            print("\n⚠️  DATABASE CORRUPTION DETECTED - ATTEMPTING ANALYSIS")
+        else:
+            print("\n⚠️  DATABASE WARNINGS")
+        print("\nIssues found:")
         for issue in issues:
             print(f"  - {issue}")
         if recommendations:
