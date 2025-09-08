@@ -139,8 +139,8 @@ def plot_molecule(ax, positions, atom_type, alpha, spheres_3d, hex_bg_color,
                 # Draw edge outputs 1 / -1 value, convert to True / False.
                 line_width = 2
             elif dataset_info['name'] == 'ase_db':
-                # For ASE database, use the same bond analysis as QM9
-                draw_edge_int = bond_analyze.get_bond_order(atom1, atom2, dist)
+                # For ASE database, use bond analysis with existence check for unknown atom pairs
+                draw_edge_int = bond_analyze.get_bond_order(atom1, atom2, dist, check_exists=True)
                 line_width = (3 - 2) * 2 * 2
             else:
                 raise Exception('Wrong dataset_info name')

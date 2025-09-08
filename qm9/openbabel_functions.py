@@ -178,8 +178,8 @@ def build_xae_molecule_openbabel(positions, atom_types, dataset_info):
             elif dataset_info['name'] == 'geom':
                 order = geom_predictor((atom_decoder[pair[0]], atom_decoder[pair[1]]), dists[i, j], limit_bonds_to_one=True)
             elif dataset_info['name'] == 'ase_db':
-                # For ASE database, use the same bond prediction as QM9
-                order = get_bond_order(atom_decoder[pair[0]], atom_decoder[pair[1]], dists[i, j])
+                # For ASE database, use bond prediction with existence check for unknown atom pairs
+                order = get_bond_order(atom_decoder[pair[0]], atom_decoder[pair[1]], dists[i, j], check_exists=True)
             
             if order > 0:
                 # Warning: the graph should be DIRECTED

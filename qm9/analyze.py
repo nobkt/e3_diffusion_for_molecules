@@ -235,22 +235,29 @@ def check_stability(positions, atom_type, dataset_info, debug=False):
                 order = bond_analyze.geom_predictor(
                     (atom_decoder[pair[0]], atom_decoder[pair[1]]), dist)
             elif dataset_info['name'] == 'ase_db':
-                # For ASE database, use the same bond analysis as QM9
-                order = bond_analyze.get_bond_order(atom1, atom2, dist)
+                # For ASE database, use bond analysis with existence check for unknown atom pairs
+                order = bond_analyze.get_bond_order(atom1, atom2, dist, check_exists=True)
             else:
-                # Default case - use QM9 bond analysis
-                order = bond_analyze.get_bond_order(atom1, atom2, dist)
+                # Default case - use QM9 bond analysis with existence check for safety
+                order = bond_analyze.get_bond_order(atom1, atom2, dist, check_exists=True)
             nr_bonds[i] += order
             nr_bonds[j] += order
     nr_stable_bonds = 0
     for atom_type_i, nr_bonds_i in zip(atom_type, nr_bonds):
-        possible_bonds = bond_analyze.allowed_bonds[atom_decoder[atom_type_i]]
-        if type(possible_bonds) == int:
-            is_stable = possible_bonds == nr_bonds_i
+        atom_name = atom_decoder[atom_type_i]
+        if atom_name not in bond_analyze.allowed_bonds:
+            # For unknown atoms, consider them unstable (conservative approach)
+            is_stable = False
+            if debug:
+                print("Unknown atom type %s with %d bonds (not in allowed_bonds)" % (atom_name, nr_bonds_i))
         else:
-            is_stable = nr_bonds_i in possible_bonds
-        if not is_stable and debug:
-            print("Invalid bonds for molecule %s with %d bonds" % (atom_decoder[atom_type_i], nr_bonds_i))
+            possible_bonds = bond_analyze.allowed_bonds[atom_name]
+            if type(possible_bonds) == int:
+                is_stable = possible_bonds == nr_bonds_i
+            else:
+                is_stable = nr_bonds_i in possible_bonds
+            if not is_stable and debug:
+                print("Invalid bonds for molecule %s with %d bonds" % (atom_name, nr_bonds_i))
         nr_stable_bonds += int(is_stable)
 
     molecule_stable = nr_stable_bonds == len(x)
