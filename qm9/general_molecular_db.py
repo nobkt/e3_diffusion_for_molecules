@@ -351,9 +351,8 @@ def create_general_ase_config(db_path, remove_h=False, save_config=False, config
     analysis = analyze_ase_database(db_path, remove_h=remove_h)
     
     # Create configuration name based on database
-    db_name = os.path.splitext(os.path.basename(db_path))[0]
-    suffix = "_no_h" if remove_h else "_with_h"
-    dataset_name = f"{db_name}{suffix}"
+    # Always use 'ase_db' as the dataset name to match visualizer expectations
+    dataset_name = "ase_db"
     
     # Create optimal configuration
     config = create_optimal_dataset_config(
