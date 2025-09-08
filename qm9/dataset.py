@@ -155,16 +155,29 @@ def update_ase_dataset_config(atoms_list, remove_h=False):
         max_atoms = max(max_atoms, n_atoms)
         n_nodes_count[n_atoms] = n_nodes_count.get(n_atoms, 0) + 1
     
-    # Create atom mappings
+    # Create atom mappings using comprehensive element data
     all_atomic_numbers = sorted(list(all_atomic_numbers))
     
-    # Common element symbols mapping
-    atomic_num_to_symbol = {
-        1: 'H', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 15: 'P', 16: 'S', 17: 'Cl', 35: 'Br', 53: 'I',
-        14: 'Si', 13: 'Al', 32: 'Ge', 33: 'As', 34: 'Se', 5: 'B', 4: 'Be', 3: 'Li', 11: 'Na', 12: 'Mg',
-        19: 'K', 20: 'Ca', 21: 'Sc', 22: 'Ti', 23: 'V', 24: 'Cr', 25: 'Mn', 26: 'Fe', 27: 'Co', 28: 'Ni',
-        29: 'Cu', 30: 'Zn', 31: 'Ga', 50: 'Sn', 51: 'Sb', 52: 'Te', 82: 'Pb', 83: 'Bi'
-    }
+    # Use ASE's complete element mapping
+    try:
+        from ase.data import chemical_symbols
+        atomic_num_to_symbol = {}
+        for i, symbol in enumerate(chemical_symbols):
+            if i > 0 and symbol != 'X':  # Skip index 0 and placeholder
+                atomic_num_to_symbol[i] = symbol
+    except ImportError:
+        # Fallback to manual mapping if ASE data not available
+        atomic_num_to_symbol = {
+            1: 'H', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 15: 'P', 16: 'S', 17: 'Cl', 35: 'Br', 53: 'I',
+            14: 'Si', 13: 'Al', 32: 'Ge', 33: 'As', 34: 'Se', 5: 'B', 4: 'Be', 3: 'Li', 11: 'Na', 12: 'Mg',
+            19: 'K', 20: 'Ca', 21: 'Sc', 22: 'Ti', 23: 'V', 24: 'Cr', 25: 'Mn', 26: 'Fe', 27: 'Co', 28: 'Ni',
+            29: 'Cu', 30: 'Zn', 31: 'Ga', 50: 'Sn', 51: 'Sb', 52: 'Te', 82: 'Pb', 83: 'Bi',
+            # Add more elements as needed
+            2: 'He', 10: 'Ne', 18: 'Ar', 36: 'Kr', 54: 'Xe', 86: 'Rn',  # Noble gases
+            37: 'Rb', 38: 'Sr', 39: 'Y', 40: 'Zr', 41: 'Nb', 42: 'Mo', 43: 'Tc', 44: 'Ru', 45: 'Rh', 46: 'Pd',
+            47: 'Ag', 48: 'Cd', 49: 'In', 72: 'Hf', 73: 'Ta', 74: 'W', 75: 'Re', 76: 'Os', 77: 'Ir', 78: 'Pt',
+            79: 'Au', 80: 'Hg', 81: 'Tl', 84: 'Po', 85: 'At', 87: 'Fr', 88: 'Ra'
+        }
     
     atom_decoder = []
     atom_encoder = {}
@@ -180,21 +193,51 @@ def update_ase_dataset_config(atoms_list, remove_h=False):
     config['atom_decoder'] = atom_decoder
     config['max_n_nodes'] = max_atoms
     config['n_nodes'] = n_nodes_count
+    config['is_fallback_config'] = False  # Mark as dynamically updated
     
     # Update colors and radius for visualization (extend if needed)
     n_types = len(atom_decoder)
-    default_colors = ['#FFFFFF99', 'C7', 'C0', 'C3', 'C1', 'C2', 'C4', 'C5', 'C6', 'C8', 'C9']
-    default_radius = [0.46, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77]
+    
+    # Use a more diverse color palette
+    base_colors = [
+        '#FFFFFF99',  # White for H
+        'C0', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9',
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+        '#DDA0DD', '#FFB347', '#87CEEB', '#F0E68C', '#FFE4E1',
+        '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9', '#F8C471'
+    ]
+    
+    # More sophisticated radius assignment
+    default_radii = {
+        'H': 0.46, 'C': 0.77, 'N': 0.77, 'O': 0.77, 'F': 0.77,
+        'P': 0.77, 'S': 0.77, 'Cl': 0.77, 'Br': 0.77, 'I': 0.77,
+        'Si': 0.77, 'Al': 0.77, 'B': 0.77, 'Li': 0.77, 'Na': 0.77,
+        'K': 0.77, 'Ca': 0.77, 'Mg': 0.77, 'Fe': 0.77, 'Zn': 0.77,
+        'Cu': 0.77, 'Mn': 0.77, 'Co': 0.77, 'Ni': 0.77, 'Cr': 0.77
+    }
     
     if not remove_h:
-        config['colors_dic'] = (default_colors * ((n_types // len(default_colors)) + 1))[:n_types]
-        config['radius_dic'] = (default_radius * ((n_types // len(default_radius)) + 1))[:n_types]
+        # Keep hydrogen special color if present
+        config['colors_dic'] = []
+        config['radius_dic'] = []
+        for i, symbol in enumerate(atom_decoder):
+            if symbol == 'H':
+                config['colors_dic'].append('#FFFFFF99')
+                config['radius_dic'].append(0.46)
+            else:
+                color_idx = (i - (1 if 'H' in atom_decoder else 0)) % len(base_colors[1:])
+                config['colors_dic'].append(base_colors[1:][color_idx])
+                config['radius_dic'].append(default_radii.get(symbol, 0.77))
     else:
-        # Remove hydrogen colors/radius
-        config['colors_dic'] = (default_colors[1:] * ((n_types // len(default_colors[1:])) + 1))[:n_types]
-        config['radius_dic'] = (default_radius[1:] * ((n_types // len(default_radius[1:])) + 1))[:n_types]
+        config['colors_dic'] = []
+        config['radius_dic'] = []
+        for i, symbol in enumerate(atom_decoder):
+            color_idx = i % len(base_colors[1:])  # Skip hydrogen color
+            config['colors_dic'].append(base_colors[1:][color_idx])
+            config['radius_dic'].append(default_radii.get(symbol, 0.77))
     
     print(f"Updated ASE dataset config: {len(atom_decoder)} atom types, max {max_atoms} atoms per molecule")
+    print(f"Elements found: {', '.join(atom_decoder)}")
 
 
 def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=True, remove_h=False):

@@ -139,7 +139,7 @@ if 'ase_db' in args.dataset and args.ase_db_path is None:
 if abs(sum(args.split_ratios) - 1.0) > 1e-6:
     raise ValueError(f"Split ratios must sum to 1.0, got {sum(args.split_ratios)}")
 
-dataset_info = get_dataset_info(args.dataset, args.remove_h)
+dataset_info = get_dataset_info(args.dataset, args.remove_h, getattr(args, 'ase_db_path', None))
 
 atom_encoder = dataset_info['atom_encoder']
 atom_decoder = dataset_info['atom_decoder']

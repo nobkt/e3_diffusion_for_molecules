@@ -135,34 +135,64 @@ geom_no_h = {
 
 
 # ASE database configurations - these can be dynamically updated based on actual data
+# These serve as fallback configurations when automatic analysis is not available
+
+# Extended common elements for general molecular databases
+common_elements_with_h = [
+    'H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Br', 'I',  # Most common
+    'B', 'Si', 'Al', 'As', 'Se', 'K', 'Ca', 'Na', 'Mg',  # Moderately common
+    'Fe', 'Zn', 'Cu', 'Mn', 'Co', 'Ni', 'Cr', 'Ti', 'V'  # Metal atoms in bioorganics
+]
+
+common_elements_without_h = [elem for elem in common_elements_with_h if elem != 'H']
+
 ase_db_with_h = {
     'name': 'ase_db',
-    'atom_encoder': {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4, 'P': 5, 'S': 6, 'Cl': 7, 'Br': 8, 'I': 9},  # Common atoms, will be updated
-    'atom_decoder': ['H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Br', 'I'],  # Will be updated based on actual data
-    'max_n_nodes': 100,  # Default, will be updated based on actual data
+    'atom_encoder': {elem: i for i, elem in enumerate(common_elements_with_h)},
+    'atom_decoder': common_elements_with_h.copy(),
+    'max_n_nodes': 200,  # Increased for general databases
     'n_nodes': {},  # Will be populated based on actual data
     'atom_types': {},  # Will be populated based on actual data
     'distances': [],  # Will be populated based on actual data if needed
-    'colors_dic': ['#FFFFFF99', 'C7', 'C0', 'C3', 'C1', 'C2', 'C4', 'C5', 'C6', 'C8'],
-    'radius_dic': [0.46, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77],
-    'with_h': True
+    'colors_dic': ['#FFFFFF99'] + ['C' + str(i) for i in range(len(common_elements_with_h)-1)],
+    'radius_dic': [0.46 if elem == 'H' else 0.77 for elem in common_elements_with_h],
+    'with_h': True,
+    'is_fallback_config': True  # Mark as fallback configuration
 }
 
 ase_db_without_h = {
     'name': 'ase_db',
-    'atom_encoder': {'C': 0, 'N': 1, 'O': 2, 'F': 3, 'P': 4, 'S': 5, 'Cl': 6, 'Br': 7, 'I': 8},  # Common non-H atoms
-    'atom_decoder': ['C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Br', 'I'],  # Will be updated based on actual data
-    'max_n_nodes': 100,  # Default, will be updated based on actual data
+    'atom_encoder': {elem: i for i, elem in enumerate(common_elements_without_h)},
+    'atom_decoder': common_elements_without_h.copy(),
+    'max_n_nodes': 200,  # Increased for general databases
     'n_nodes': {},  # Will be populated based on actual data
     'atom_types': {},  # Will be populated based on actual data
     'distances': [],  # Will be populated based on actual data if needed
-    'colors_dic': ['C7', 'C0', 'C3', 'C1', 'C2', 'C4', 'C5', 'C6', 'C8'],
-    'radius_dic': [0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77],
-    'with_h': False
+    'colors_dic': ['C' + str(i) for i in range(len(common_elements_without_h))],
+    'radius_dic': [0.77 for _ in common_elements_without_h],
+    'with_h': False,
+    'is_fallback_config': True  # Mark as fallback configuration
 }
 
 
-def get_dataset_info(dataset_name, remove_h):
+def get_dataset_info(dataset_name, remove_h, ase_db_path=None):
+    """
+    Get dataset configuration information.
+    
+    Parameters
+    ----------
+    dataset_name : str
+        Name of the dataset ('qm9', 'geom', 'ase_db', or path to config file)
+    remove_h : bool
+        Whether hydrogen atoms should be removed
+    ase_db_path : str, optional
+        Path to ASE database file (used for automatic config generation)
+        
+    Returns
+    -------
+    dataset_info : dict
+        Dataset configuration dictionary
+    """
     if dataset_name == 'qm9':
         if not remove_h:
             return qm9_with_h
@@ -179,9 +209,55 @@ def get_dataset_info(dataset_name, remove_h):
         else:
             raise Exception('Missing config for %s without hydrogens' % dataset_name)
     elif dataset_name == 'ase_db':
+        # For ASE databases, try to use automatically generated configuration
+        if ase_db_path is not None:
+            try:
+                from qm9.general_molecular_db import create_general_ase_config
+                print(f"Automatically generating configuration for ASE database: {ase_db_path}")
+                return create_general_ase_config(ase_db_path, remove_h=remove_h)
+            except Exception as e:
+                print(f"Warning: Could not auto-generate config for {ase_db_path}: {e}")
+                print("Falling back to default ASE configuration")
+        
+        # Fall back to default ASE configurations
         if not remove_h:
             return ase_db_with_h
         else:
             return ase_db_without_h
+    elif dataset_name.endswith('.json'):
+        # Load configuration from JSON file
+        try:
+            import json
+            with open(dataset_name, 'r') as f:
+                config = json.load(f)
+            print(f"Loaded dataset configuration from: {dataset_name}")
+            return config
+        except Exception as e:
+            raise Exception(f"Could not load configuration from {dataset_name}: {e}")
     else:
         raise Exception("Wrong dataset %s" % dataset_name)
+
+
+def create_dynamic_ase_config(db_path, remove_h=False):
+    """
+    Create a dynamic ASE configuration by analyzing the database.
+    This is a convenience function that can be called directly.
+    
+    Parameters
+    ----------
+    db_path : str
+        Path to the ASE database file  
+    remove_h : bool
+        Whether to remove hydrogen atoms
+        
+    Returns
+    -------
+    config : dict
+        Generated dataset configuration
+    """
+    try:
+        from qm9.general_molecular_db import create_general_ase_config
+        return create_general_ase_config(db_path, remove_h=remove_h)
+    except ImportError:
+        print("Warning: general_molecular_db module not available, using default ASE config")
+        return ase_db_without_h if remove_h else ase_db_with_h

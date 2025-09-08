@@ -1,6 +1,28 @@
-# ASE Database Support for E3 Diffusion
+# General Molecular Database Support for E3 Diffusion
 
-This repository now supports loading molecular datasets from ASE (Atomic Simulation Environment) database format, in addition to the original QM9 and GEOM datasets.
+This repository supports loading molecular datasets from various sources including PubChem and other general molecular databases through ASE (Atomic Simulation Environment) database format, in addition to the original QM9 and GEOM datasets.
+
+## Key Features
+
+### 🚀 **NEW: Automatic Configuration Generation**
+The system now automatically analyzes any molecular database and creates optimized configurations, supporting:
+- **Any combination of elements** from the periodic table
+- **Dynamic atom type detection** based on actual database content  
+- **Automatic optimization** of model parameters based on dataset characteristics
+- **Comprehensive validation** and recommendations for training
+
+### 🧪 **General Molecular Database Support**
+- Support for **PubChem** and other large molecular databases
+- **Automatic element mapping** for the entire periodic table
+- **Dynamic configuration generation** based on database analysis
+- **Flexible molecular size handling** (from small molecules to large drug-like compounds)
+- **Comprehensive property support** for any molecular descriptors
+
+### 🔧 **Easy-to-Use Utilities**
+- **Database analysis** and validation tools
+- **Automatic training parameter recommendations**
+- **Configuration file generation** for complex databases
+- **PubChem SDF conversion** utilities
 
 ## Installation
 
@@ -10,6 +32,88 @@ pip install ase openbabel-wheel
 ```
 
 These are already included in the updated `requirements.txt`.
+
+## Quick Start for General Molecular Databases
+
+### 1. Analyze Your Database
+
+Before training, analyze your molecular database to understand its characteristics:
+
+```bash
+python molecular_db_utils.py analyze --db_path your_molecules.db
+```
+
+This will show you:
+- Number of molecules and elements
+- Molecular size distribution  
+- Available properties
+- Training recommendations
+
+### 2. Automatic Training
+
+For most databases, you can start training immediately without manual configuration:
+
+```bash
+python main_qm9.py --dataset ase_db --ase_db_path your_molecules.db
+```
+
+The system will automatically:
+- Analyze your database
+- Create optimal configurations
+- Detect all elements present
+- Set appropriate model parameters
+
+### 3. Get Training Recommendations
+
+For optimal results, get customized training parameters:
+
+```bash
+python molecular_db_utils.py recommend --db_path your_molecules.db
+```
+
+### 4. Convert PubChem Data
+
+Convert PubChem SDF files to ASE database format:
+
+```bash
+python molecular_db_utils.py convert-pubchem --sdf_path pubchem_data.sdf --output molecules.db
+```
+
+## Advanced Usage
+
+### Manual Configuration Creation
+
+For advanced use cases, create custom configurations:
+
+```bash
+python molecular_db_utils.py create-config --db_path molecules.db --output custom_config.json
+```
+
+Then use the custom configuration:
+
+```bash
+python main_qm9.py --dataset custom_config.json
+```
+
+### Database Validation
+
+Validate that your database is suitable for training:
+
+```bash
+python molecular_db_utils.py validate --db_path molecules.db
+```
+
+### Working with Large Databases
+
+For very large databases (>100K molecules), consider:
+
+```bash
+# Use larger batch sizes and fewer epochs
+python main_qm9.py --dataset ase_db --ase_db_path large_db.db --batch_size 256 --n_epochs 50
+
+# Filter to smaller molecules for faster training
+python main_qm9.py --dataset ase_db --ase_db_path large_db.db --filter_n_atoms 30
+```
 
 ## Usage
 
