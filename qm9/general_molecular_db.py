@@ -72,8 +72,17 @@ def analyze_ase_database(db_path, include_charges=True, remove_h=False):
     
     print(f"Analyzing ASE database: {db_path}")
     
-    # Connect to database
-    db = connect(db_path)
+    # Connect to database with error handling
+    try:
+        db = connect(db_path)
+    except Exception as e:
+        error_message = str(e).lower()
+        if "database disk image is malformed" in error_message:
+            raise RuntimeError("Database file is corrupted (malformed disk image). Please recreate the database from original data.")
+        elif "file is not a database" in error_message:
+            raise RuntimeError("File is not a valid ASE database. Check file format and extension.")
+        else:
+            raise RuntimeError(f"Cannot access database: {str(e)}")
     
     # Initialize analysis data structures
     unique_elements = set()
@@ -84,53 +93,72 @@ def analyze_ase_database(db_path, include_charges=True, remove_h=False):
     total_molecules = 0
     max_atoms = 0
     
-    # Analyze each molecule in the database
-    for row in db.select():
-        atoms = row.toatoms()
-        total_molecules += 1
-        
-        # Get atomic symbols and numbers
-        symbols = atoms.get_chemical_symbols()
-        atomic_numbers = atoms.numbers
-        
-        if remove_h:
-            # Filter out hydrogen atoms
-            mask = atomic_numbers != 1
-            symbols = [s for s, keep in zip(symbols, mask) if keep]
-            atomic_numbers = atomic_numbers[mask]
-        
-        # Update element statistics
-        for symbol in symbols:
-            unique_elements.add(symbol)
-            element_counts[symbol] = element_counts.get(symbol, 0) + 1
-        
-        # Update molecular size statistics
-        n_atoms = len(symbols)
-        max_atoms = max(max_atoms, n_atoms)
-        molecular_sizes[n_atoms] = molecular_sizes.get(n_atoms, 0) + 1
-        
-        # Analyze properties
-        if hasattr(row, 'data') and row.data:
-            for prop_name, value in row.data.items():
-                available_properties.add(prop_name)
-                if prop_name not in property_values:
-                    property_values[prop_name] = []
-                try:
-                    # Try to convert to float for numerical properties
-                    property_values[prop_name].append(float(value))
-                except (ValueError, TypeError):
-                    # Skip non-numerical properties for statistics
-                    pass
-        
-        if hasattr(row, 'key_value_pairs') and row.key_value_pairs:
-            for prop_name, value in row.key_value_pairs.items():
-                available_properties.add(prop_name)
-                if prop_name not in property_values:
-                    property_values[prop_name] = []
-                try:
-                    property_values[prop_name].append(float(value))
-                except (ValueError, TypeError):
-                    pass
+    # Analyze each molecule in the database with error handling
+    try:
+        for row in db.select():
+            try:
+                atoms = row.toatoms()
+                total_molecules += 1
+                
+                # Get atomic symbols and numbers
+                symbols = atoms.get_chemical_symbols()
+                atomic_numbers = atoms.numbers
+                
+                if remove_h:
+                    # Filter out hydrogen atoms
+                    mask = atomic_numbers != 1
+                    symbols = [s for s, keep in zip(symbols, mask) if keep]
+                    atomic_numbers = atomic_numbers[mask]
+                
+                # Update element statistics
+                for symbol in symbols:
+                    unique_elements.add(symbol)
+                    element_counts[symbol] = element_counts.get(symbol, 0) + 1
+                
+                # Update molecular size statistics
+                n_atoms = len(symbols)
+                max_atoms = max(max_atoms, n_atoms)
+                molecular_sizes[n_atoms] = molecular_sizes.get(n_atoms, 0) + 1
+                
+                # Analyze properties
+                if hasattr(row, 'data') and row.data:
+                    for prop_name, value in row.data.items():
+                        available_properties.add(prop_name)
+                        if prop_name not in property_values:
+                            property_values[prop_name] = []
+                        try:
+                            # Try to convert to float for numerical properties
+                            property_values[prop_name].append(float(value))
+                        except (ValueError, TypeError):
+                            # Skip non-numerical properties for statistics
+                            pass
+                
+                if hasattr(row, 'key_value_pairs') and row.key_value_pairs:
+                    for prop_name, value in row.key_value_pairs.items():
+                        available_properties.add(prop_name)
+                        if prop_name not in property_values:
+                            property_values[prop_name] = []
+                        try:
+                            property_values[prop_name].append(float(value))
+                        except (ValueError, TypeError):
+                            pass
+            
+            except Exception as e:
+                print(f"Warning: Error processing molecule {total_molecules}: {str(e)}")
+                # Continue with next molecule rather than failing completely
+                continue
+                
+    except Exception as e:
+        if total_molecules == 0:
+            # If we couldn't process any molecules, this is a fatal error
+            error_message = str(e).lower()
+            if "database disk image is malformed" in error_message:
+                raise RuntimeError("Database file is corrupted (malformed disk image). Please recreate the database from original data.")
+            else:
+                raise RuntimeError(f"Cannot access database rows: {str(e)}")
+        else:
+            print(f"Warning: Database iteration ended prematurely after {total_molecules} molecules: {str(e)}")
+            # Continue with analysis of molecules processed so far
     
     # Compute property statistics
     property_statistics = {}
@@ -363,82 +391,157 @@ def validate_molecular_database(db_path):
     issues = []
     recommendations = []
     
+    # First, try to establish database connection and basic integrity check
     try:
         db = connect(db_path)
-        total_molecules = 0
         
-        # Check if database is empty
+        # Count total molecules more efficiently
         try:
-            first_row = next(db.select())
-            total_molecules = len(list(db.select()))
-        except StopIteration:
-            issues.append("Database is empty")
-            return False, issues, ["Add molecular structures to the database"]
+            # Try to get count without iterating through all rows first
+            rows = list(db.select())
+            total_molecules = len(rows)
+            
+            if total_molecules == 0:
+                issues.append("Database is empty")
+                return False, issues, ["Add molecular structures to the database"]
+                
+        except Exception as count_error:
+            # If we can't even count rows, the database is likely corrupted
+            issues.append(f"Cannot access database rows: {str(count_error)}")
+            return False, issues, ["Database appears to be corrupted or incompatible"]
         
-        # Check minimum number of molecules
+        # Check minimum number of molecules  
         if total_molecules < 10:
             issues.append(f"Very few molecules ({total_molecules}). Consider using at least 100 molecules for training.")
+            # Don't return early - continue with analysis but mark as having issues
         
-        # Analyze molecular diversity
-        analysis = analyze_ase_database(db_path)
+        # Perform basic structural validation using the already loaded rows
+        # This avoids calling analyze_ase_database which might fail on corrupted databases
+        unique_elements = set()
+        molecular_sizes = []
+        coord_issues = 0
+        sample_count = 0
+        available_properties = set()
+        
+        for row in rows:
+            try:
+                atoms = row.toatoms()
+                symbols = atoms.get_chemical_symbols()
+                positions = atoms.positions
+                
+                # Update element statistics
+                unique_elements.update(symbols)
+                molecular_sizes.append(len(symbols))
+                
+                # Check for coordinate issues
+                if sample_count < 100:  # Check first 100 molecules
+                    # Check for NaN or infinite coordinates
+                    if np.any(np.isnan(positions)) or np.any(np.isinf(positions)):
+                        coord_issues += 1
+                    
+                    # Check for unrealistic coordinates (very large distances)
+                    if np.any(np.abs(positions) > 1000):  # More than 1000 Å from origin
+                        coord_issues += 1
+                
+                # Check properties
+                if hasattr(row, 'data') and row.data:
+                    available_properties.update(row.data.keys())
+                if hasattr(row, 'key_value_pairs') and row.key_value_pairs:
+                    available_properties.update(row.key_value_pairs.keys())
+                
+                sample_count += 1
+                
+            except Exception as e:
+                # If we can't process individual molecules, note it but continue
+                issues.append(f"Error processing molecule {sample_count + 1}: {str(e)}")
+                sample_count += 1
+                continue
         
         # Check element diversity
-        n_elements = len(analysis['unique_elements'])
+        n_elements = len(unique_elements)
         if n_elements < 2:
             issues.append("Very low element diversity. Consider using molecules with more varied elements.")
         elif n_elements > 50:
             recommendations.append("High element diversity detected. Consider filtering to most common elements for better training.")
         
         # Check molecular size distribution
-        sizes = list(analysis['molecular_sizes'].keys())
-        if max(sizes) > 100:
-            issues.append("Very large molecules detected (>100 atoms). Consider filtering for computational efficiency.")
-        
-        if min(sizes) < 2:
-            issues.append("Very small molecules detected (<2 atoms). Consider filtering.")
+        if molecular_sizes:
+            max_size = max(molecular_sizes)
+            min_size = min(molecular_sizes)
+            
+            if max_size > 100:
+                issues.append("Very large molecules detected (>100 atoms). Consider filtering for computational efficiency.")
+            
+            if min_size < 2:
+                issues.append("Very small molecules detected (<2 atoms). Consider filtering.")
         
         # Check for missing properties
-        if len(analysis['available_properties']) == 0:
+        if len(available_properties) == 0:
             recommendations.append("No molecular properties found. Consider adding properties like energy, HOMO, LUMO for conditional generation.")
-        
-        # Check for coordinate issues
-        sample_count = 0
-        coord_issues = 0
-        
-        for row in db.select():
-            if sample_count >= 100:  # Check first 100 molecules
-                break
-            
-            atoms = row.toatoms()
-            positions = atoms.positions
-            
-            # Check for NaN or infinite coordinates
-            if np.any(np.isnan(positions)) or np.any(np.isinf(positions)):
-                coord_issues += 1
-            
-            # Check for unrealistic coordinates (very large distances)
-            if np.any(np.abs(positions) > 1000):  # More than 1000 Å from origin
-                coord_issues += 1
-            
-            sample_count += 1
         
         if coord_issues > 0:
             issues.append(f"Coordinate issues found in {coord_issues}/{sample_count} sampled molecules")
             recommendations.append("Check molecular geometries and ensure coordinates are in Angstrom units")
         
     except Exception as e:
-        issues.append(f"Error accessing database: {str(e)}")
-        return False, issues, ["Check database file integrity"]
+        # Provide more specific error messages for common database issues
+        error_message = str(e).lower()
+        if "database disk image is malformed" in error_message:
+            issues.append("Database file is corrupted (malformed disk image)")
+            recommendations.extend([
+                "The database file appears to be corrupted",
+                "Try recreating the database from the original molecular data",
+                "Check if the file was completely written/transferred",
+                "Verify file permissions and storage integrity"
+            ])
+        elif "file is not a database" in error_message:
+            issues.append("File is not a valid SQLite/ASE database")
+            recommendations.extend([
+                "Ensure the file is a valid ASE database",
+                "Check if the file extension and format are correct",
+                "Try opening the file with ASE directly to verify format"
+            ])
+        elif "database is locked" in error_message:
+            issues.append("Database is currently locked by another process")
+            recommendations.extend([
+                "Close any other applications using the database",
+                "Wait a moment and try again",
+                "Check for concurrent access to the database file"
+            ])
+        else:
+            issues.append(f"Error accessing database: {str(e)}")
+            recommendations.append("Check database file integrity and format")
+        
+        return False, issues, recommendations
     
-    is_valid = len(issues) == 0
+    is_valid = len([issue for issue in issues if is_critical_issue(issue)]) == 0
     
     if not is_valid:
         recommendations.extend([
+            "Critical issues found that prevent database use",
+            "Address the critical issues before proceeding"
+        ])
+    elif len(issues) > 0:
+        recommendations.extend([
+            "Database can be used but has some issues",
             "Consider preprocessing the database to address the issues",
             "Use the analyze_ase_database() function for detailed analysis"
         ])
     
     return is_valid, issues, recommendations
+
+
+def is_critical_issue(issue):
+    """
+    Determine if an issue is critical (prevents database use) or just a warning.
+    """
+    critical_keywords = [
+        "corrupted", "malformed", "cannot access", "not a valid",
+        "error processing", "coordinate issues", "very small molecules"
+    ]
+    
+    issue_lower = issue.lower()
+    return any(keyword in issue_lower for keyword in critical_keywords)
 
 
 def suggest_training_parameters(analysis):
@@ -463,7 +566,7 @@ def suggest_training_parameters(analysis):
     
     # Batch size suggestions
     if n_molecules < 1000:
-        suggestions['batch_size'] = min(32, n_molecules // 10)
+        suggestions['batch_size'] = max(1, min(32, n_molecules // 10))
     elif n_molecules < 10000:
         suggestions['batch_size'] = 64
     else:
@@ -544,8 +647,27 @@ def print_database_summary(db_path, save_summary=False, summary_path=None):
             print(f"  - {rec}")
         return
     
-    # Analyze database
-    analysis = analyze_ase_database(db_path)
+    # Show warnings even for valid databases
+    if len(issues) > 0:
+        print("\n⚠️  DATABASE WARNINGS")
+        print("\nIssues found (non-critical):")
+        for issue in issues:
+            print(f"  - {issue}")
+        if recommendations:
+            print("\nRecommendations:")
+            for rec in recommendations:
+                print(f"  - {rec}")
+        print()  # Add spacing before analysis
+    
+    # Analyze database with error handling
+    try:
+        analysis = analyze_ase_database(db_path)
+    except Exception as e:
+        print("\n❌ DATABASE ANALYSIS FAILED")
+        print(f"\nError: {str(e)}")
+        print("\nThe database passed basic validation but detailed analysis failed.")
+        print("This may indicate partial corruption or compatibility issues.")
+        return
     
     # Print basic statistics
     print(f"\n📊 BASIC STATISTICS")

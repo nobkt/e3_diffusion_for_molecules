@@ -32,3 +32,6 @@ figures/
 geom_drugs.sh
 /tmp/test_*.png
 /tmp/test_*.py
+
+# Database test files - exclude from commits
+*.db
