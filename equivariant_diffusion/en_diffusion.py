@@ -418,7 +418,8 @@ class EnVariationalDiffusion(torch.nn.Module):
         mu_T_x, mu_T_h = mu_T[:, :, :self.n_dims], mu_T[:, :, self.n_dims:]
 
         # Compute standard deviations (only batch axis for x-part, inflated for h-part).
-        sigma_T_x = self.sigma(gamma_T, mu_T_x).squeeze()  # Remove inflate, only keep batch dimension for x-part.
+        sigma_T_x_inflated = self.sigma(gamma_T, mu_T_x)
+        sigma_T_x = sigma_T_x_inflated.view(sigma_T_x_inflated.size(0))  # Keep only batch dimension for x-part.
         sigma_T_h = self.sigma(gamma_T, mu_T_h)
 
         # Compute KL for h-part.
