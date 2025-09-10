@@ -160,7 +160,15 @@ class DistributionProperty:
     def sample(self, n_nodes=19):
         vals = []
         for prop in self.properties:
-            dist = self.distributions[prop][n_nodes]
+            # Handle case where n_nodes doesn't exist in distributions
+            if n_nodes not in self.distributions[prop]:
+                # Find the closest available node count
+                available_nodes = list(self.distributions[prop].keys())
+                closest_n_nodes = min(available_nodes, key=lambda x: abs(x - n_nodes))
+                dist = self.distributions[prop][closest_n_nodes]
+            else:
+                dist = self.distributions[prop][n_nodes]
+            
             idx = dist['probs'].sample((1,))
             val = self._idx2value(idx, dist['params'], len(dist['probs'].probs))
             val = self.normalize_tensor(val, prop)
