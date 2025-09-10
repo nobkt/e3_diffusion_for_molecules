@@ -494,6 +494,7 @@ def validate_molecular_database(db_path):
             
             if max_size > 100:
                 issues.append("Very large molecules detected (>100 atoms). Consider filtering for computational efficiency.")
+                recommendations.append("Use the filter command to remove large molecules: python molecular_db_utils.py filter --input_db your_db.db --output_db filtered_db.db --max_atoms 100")
             
             if min_size < 2:
                 issues.append("Very small molecules detected (<2 atoms). Consider filtering.")
@@ -634,7 +635,8 @@ def suggest_training_parameters(analysis):
         suggestions['batch_size'] = min(suggestions['batch_size'], 32)
         suggestions['recommendations'] = [
             "Large molecules detected. Consider reducing batch size if you encounter memory issues.",
-            "Consider filtering molecules to a smaller maximum size for efficiency."
+            "Consider filtering molecules to a smaller maximum size for efficiency.",
+            "Use: python molecular_db_utils.py filter --input_db your_db.db --output_db filtered_db.db --max_atoms 100"
         ]
     
     # Property conditioning suggestions
@@ -788,3 +790,151 @@ def print_database_summary(db_path, save_summary=False, summary_path=None):
         
         # TODO: Implement summary saving to file
         print(f"\n💾 Summary saved to: {summary_path}")
+
+
+def filter_molecular_database(input_db_path, output_db_path, max_atoms=100, min_atoms=2, 
+                             remove_h=False, preserve_properties=True):
+    """
+    Filter an ASE molecular database to remove molecules outside size constraints.
+    
+    Parameters
+    ----------
+    input_db_path : str
+        Path to the input ASE database file
+    output_db_path : str
+        Path to create the filtered ASE database
+    max_atoms : int
+        Maximum number of atoms per molecule (default: 100)
+    min_atoms : int
+        Minimum number of atoms per molecule (default: 2)
+    remove_h : bool
+        Whether to exclude hydrogen atoms from atom count (default: False)
+    preserve_properties : bool
+        Whether to preserve all molecular properties (default: True)
+        
+    Returns
+    -------
+    filter_stats : dict
+        Statistics about the filtering process:
+        - total_input: number of molecules in input database
+        - total_output: number of molecules in output database
+        - filtered_out: number of molecules removed
+        - size_distribution: dict mapping sizes to counts for output
+    """
+    try:
+        from ase.db import connect
+    except ImportError:
+        raise ImportError("ASE package is required. Install with: pip install ase")
+    
+    if not os.path.exists(input_db_path):
+        raise FileNotFoundError(f"Input database not found: {input_db_path}")
+    
+    print(f"Filtering database: {input_db_path}")
+    print(f"Constraints: {min_atoms} <= atoms <= {max_atoms}")
+    if remove_h:
+        print("Note: Hydrogen atoms excluded from count")
+    
+    # Connect to input database
+    input_db = connect(input_db_path)
+    
+    # Create output database (will overwrite if exists)
+    output_db = connect(output_db_path)
+    
+    # Initialize statistics
+    total_input = 0
+    total_output = 0
+    filtered_out = 0
+    size_distribution = {}
+    too_large = 0
+    too_small = 0
+    
+    try:
+        for row in input_db.select():
+            total_input += 1
+            
+            try:
+                atoms = row.toatoms()
+                
+                # Get atom count based on remove_h setting
+                if remove_h:
+                    # Count only non-hydrogen atoms
+                    n_atoms = sum(1 for symbol in atoms.get_chemical_symbols() if symbol != 'H')
+                else:
+                    # Count all atoms
+                    n_atoms = len(atoms)
+                
+                # Check size constraints
+                if n_atoms < min_atoms:
+                    too_small += 1
+                    filtered_out += 1
+                    continue
+                    
+                if n_atoms > max_atoms:
+                    too_large += 1
+                    filtered_out += 1
+                    continue
+                
+                # Molecule passes filters - add to output database
+                total_output += 1
+                size_distribution[n_atoms] = size_distribution.get(n_atoms, 0) + 1
+                
+                # Copy molecule and properties to output database
+                if preserve_properties:
+                    # Copy all data and key-value pairs
+                    data = row.data if hasattr(row, 'data') and row.data else {}
+                    kvp = row.key_value_pairs if hasattr(row, 'key_value_pairs') and row.key_value_pairs else {}
+                    
+                    # Merge data and key-value pairs
+                    all_properties = {}
+                    all_properties.update(data)
+                    all_properties.update(kvp)
+                    
+                    output_db.write(atoms, data=all_properties)
+                else:
+                    output_db.write(atoms)
+                
+            except Exception as e:
+                print(f"Warning: Error processing molecule {total_input}: {str(e)}")
+                filtered_out += 1
+                continue
+                
+            # Progress indicator for large databases
+            if total_input % 1000 == 0:
+                print(f"  Processed {total_input} molecules, kept {total_output}")
+                
+    except Exception as e:
+        print(f"Error during filtering: {str(e)}")
+        raise
+    
+    # Compile statistics
+    filter_stats = {
+        'total_input': total_input,
+        'total_output': total_output,
+        'filtered_out': filtered_out,
+        'too_large': too_large,
+        'too_small': too_small,
+        'size_distribution': size_distribution
+    }
+    
+    # Print summary
+    print(f"\n🔧 FILTERING COMPLETE")
+    print(f"  Input molecules: {total_input:,}")
+    print(f"  Output molecules: {total_output:,}")
+    print(f"  Filtered out: {filtered_out:,} ({100 * filtered_out / total_input:.1f}%)")
+    if too_large > 0:
+        print(f"    - Too large (>{max_atoms} atoms): {too_large:,}")
+    if too_small > 0:
+        print(f"    - Too small (<{min_atoms} atoms): {too_small:,}")
+    print(f"  Filtered database saved to: {output_db_path}")
+    
+    # Show size distribution summary
+    if size_distribution:
+        print(f"\n📏 OUTPUT SIZE DISTRIBUTION")
+        sorted_sizes = sorted(size_distribution.items())[:10]  # Show first 10
+        for size, count in sorted_sizes:
+            percentage = (count / total_output) * 100
+            print(f"  {size:2d} atoms: {count:6,} molecules ({percentage:5.1f}%)")
+        if len(size_distribution) > 10:
+            print(f"  ... and {len(size_distribution) - 10} more size categories")
+    
+    return filter_stats

@@ -29,7 +29,8 @@ from qm9.general_molecular_db import (
     validate_molecular_database,
     suggest_training_parameters,
     print_database_summary,
-    save_dataset_config
+    save_dataset_config,
+    filter_molecular_database
 )
 
 
@@ -160,6 +161,41 @@ def cmd_recommend(args):
         return 1
 
 
+def cmd_filter(args):
+    """Filter database to remove molecules outside size constraints."""
+    if not os.path.exists(args.input_db):
+        print(f"Error: Input database file not found: {args.input_db}")
+        return 1
+    
+    # Check if output exists and handle overwrite
+    if os.path.exists(args.output_db) and not args.overwrite:
+        print(f"Error: Output database already exists: {args.output_db}")
+        print("Use --overwrite to replace existing file")
+        return 1
+    
+    try:
+        filter_stats = filter_molecular_database(
+            input_db_path=args.input_db,
+            output_db_path=args.output_db,
+            max_atoms=args.max_atoms,
+            min_atoms=args.min_atoms,
+            remove_h=args.remove_h,
+            preserve_properties=not args.no_properties
+        )
+        
+        # Optionally analyze the filtered database
+        if args.analyze:
+            print("\n" + "=" * 50)
+            print("ANALYZING FILTERED DATABASE")
+            print("=" * 50)
+            print_database_summary(args.output_db)
+        
+        return 0
+    except Exception as e:
+        print(f"Error filtering database: {e}")
+        return 1
+
+
 def cmd_convert_pubchem(args):
     """Convert PubChem SDF files to ASE database format."""
     try:
@@ -229,6 +265,9 @@ Examples:
   # Get training recommendations
   python molecular_db_utils.py recommend --db_path molecules.db
   
+  # Filter database to remove large molecules
+  python molecular_db_utils.py filter --input_db molecules.db --output_db filtered.db --max_atoms 50
+  
   # Convert PubChem SDF to ASE database
   python molecular_db_utils.py convert-pubchem --sdf_path pubchem.sdf --output molecules.db
         """
@@ -257,6 +296,17 @@ Examples:
     recommend_parser.add_argument('--db_path', required=True, help='Path to ASE database file')
     recommend_parser.add_argument('--remove_h', action='store_true', help='Remove hydrogen atoms')
     
+    # Filter command
+    filter_parser = subparsers.add_parser('filter', help='Filter database by molecular size')
+    filter_parser.add_argument('--input_db', required=True, help='Path to input ASE database file')
+    filter_parser.add_argument('--output_db', required=True, help='Path to output filtered ASE database file')
+    filter_parser.add_argument('--max_atoms', type=int, default=100, help='Maximum atoms per molecule (default: 100)')
+    filter_parser.add_argument('--min_atoms', type=int, default=2, help='Minimum atoms per molecule (default: 2)')
+    filter_parser.add_argument('--remove_h', action='store_true', help='Exclude hydrogen atoms from count')
+    filter_parser.add_argument('--no_properties', action='store_true', help='Do not preserve molecular properties')
+    filter_parser.add_argument('--overwrite', action='store_true', help='Overwrite output file if it exists')
+    filter_parser.add_argument('--analyze', action='store_true', help='Analyze the filtered database after creation')
+    
     # Convert PubChem command
     convert_parser = subparsers.add_parser('convert-pubchem', help='Convert PubChem SDF to ASE database')
     convert_parser.add_argument('--sdf_path', required=True, help='Path to PubChem SDF file')
@@ -276,6 +326,7 @@ Examples:
         'create-config': cmd_create_config,
         'validate': cmd_validate,
         'recommend': cmd_recommend,
+        'filter': cmd_filter,
         'convert-pubchem': cmd_convert_pubchem
     }
     
