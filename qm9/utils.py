@@ -23,15 +23,19 @@ def compute_mean_mad_from_dataloader(dataloader, properties):
             mean = torch.mean(values, dim=0)
             ma = torch.abs(values - mean.unsqueeze(0))
             mad = torch.mean(ma, dim=0)
-            # Add small epsilon to prevent division by zero
-            mad = torch.clamp(mad, min=1e-8)
+            # Use a more reasonable minimum MAD to prevent extreme normalization
+            # Use 1% of the mean absolute value or a minimum of 0.1 for numerical stability
+            min_mad = torch.clamp(torch.abs(mean) * 0.01, min=0.1)
+            mad = torch.clamp(mad, min=min_mad)
         else:
             # For scalar features, use the original logic
             mean = torch.mean(values)
             ma = torch.abs(values - mean)
             mad = torch.mean(ma)
-            # Add small epsilon to prevent division by zero when all values are the same
-            mad = torch.max(mad, torch.tensor(1e-8))
+            # Use a more reasonable minimum MAD to prevent extreme normalization
+            # Use 1% of the mean absolute value or a minimum of 0.1 for numerical stability
+            min_mad = max(abs(float(mean)) * 0.01, 0.1)
+            mad = torch.max(mad, torch.tensor(min_mad))
         
         property_norms[property_key] = {}
         property_norms[property_key]['mean'] = mean
@@ -91,6 +95,17 @@ def prepare_context(conditioning, minibatch, property_norms):
                 properties = (properties - mean.unsqueeze(0)) / mad.unsqueeze(0)
             else:
                 properties = (properties - mean) / mad
+        
+        # Add numerical stability checks
+        if torch.any(torch.isnan(properties)) or torch.any(torch.isinf(properties)):
+            print(f"Warning: NaN or Inf detected in property '{key}' after normalization")
+            print(f"  Original range: [{torch.min(minibatch[key]):.3f}, {torch.max(minibatch[key]):.3f}]")
+            print(f"  Mean: {mean}, MAD: {mad}")
+            # Replace NaN/Inf with zeros
+            properties = torch.nan_to_num(properties, nan=0.0, posinf=10.0, neginf=-10.0)
+        
+        # Clamp extreme values to prevent numerical instability
+        properties = torch.clamp(properties, min=-50.0, max=50.0)
         
         if len(properties.size()) == 1:
             # Global feature.

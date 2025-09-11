@@ -489,23 +489,33 @@ def extract_molecular_descriptors_ase_openbabel(atoms, positions=None):
         
         # For functional groups and π conjugation, we need OpenBabel
         if OPENBABEL_AVAILABLE:
-            # Convert ASE to OpenBabel molecule
-            mol = ob.OBMol()
-            
-            # Add atoms
-            for i, (symbol, pos) in enumerate(zip(atoms.get_chemical_symbols(), atoms.positions)):
-                atom = mol.NewAtom()
-                atomic_num = ob.GetAtomicNum(symbol)
-                atom.SetAtomicNum(atomic_num)
-                atom.SetVector(float(pos[0]), float(pos[1]), float(pos[2]))
-            
-            # Try to perceive bonds
-            mol.ConnectTheDots()
-            mol.PerceiveBondOrders()
-            
-            # Extract functional groups and π conjugation ratio
-            descriptors['functional_groups'] = extract_functional_groups_openbabel(mol)
-            descriptors['pi_conjugation_ratio'] = extract_pi_conjugation_ratio_openbabel(mol)
+            try:
+                # Convert ASE to OpenBabel molecule
+                mol = ob.OBMol()
+                
+                # Add atoms
+                for i, (symbol, pos) in enumerate(zip(atoms.get_chemical_symbols(), atoms.positions)):
+                    atom = mol.NewAtom()
+                    atomic_num = ob.GetAtomicNum(symbol)
+                    if atomic_num == 0:  # Unknown element
+                        continue
+                    atom.SetAtomicNum(atomic_num)
+                    atom.SetVector(float(pos[0]), float(pos[1]), float(pos[2]))
+                
+                # Only proceed if we successfully added atoms
+                if mol.NumAtoms() > 0:
+                    # Try to perceive bonds
+                    mol.ConnectTheDots()
+                    mol.PerceiveBondOrders()
+                    
+                    # Extract functional groups and π conjugation ratio
+                    descriptors['functional_groups'] = extract_functional_groups_openbabel(mol)
+                    descriptors['pi_conjugation_ratio'] = extract_pi_conjugation_ratio_openbabel(mol)
+                else:
+                    print(f"Warning: No valid atoms found in molecule")
+            except Exception as openbabel_error:
+                print(f"Warning: OpenBabel processing failed: {openbabel_error}")
+                # Continue with default values
     
     except Exception as e:
         print(f"Warning: Failed to extract molecular descriptors: {e}")

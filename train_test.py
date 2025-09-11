@@ -72,6 +72,15 @@ def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device, dt
                   f"Loss {loss.item():.2f}, NLL: {nll.item():.2f}, "
                   f"RegTerm: {reg_term.item():.1f}, "
                   f"GradNorm: {grad_norm:.1f}")
+            
+            # Check for training instability
+            if loss.item() > 1e6 or nll.item() > 1e6:
+                print(f"WARNING: Very large loss detected (Loss: {loss.item():.2e}, NLL: {nll.item():.2e})")
+                print("Consider reducing learning rate or checking data normalization")
+            
+            if grad_norm > 1e5:
+                print(f"WARNING: Very large gradient norm detected: {grad_norm:.2e}")
+                print("Model may be experiencing numerical instability")
         nll_epoch.append(nll.item())
         if (epoch % args.test_epochs == 0) and (i % args.visualize_every_batch == 0) and not (epoch == 0 and i == 0):
             start = time.time()

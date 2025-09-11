@@ -624,20 +624,43 @@ def suggest_training_parameters(analysis):
         suggestions['nf'] = 64
         suggestions['n_layers'] = 4
     
-    # Learning rate
-    suggestions['lr'] = 2e-4
+    # Learning rate - reduce for large molecules and numerical stability
+    if max_atoms > 100:
+        suggestions['lr'] = 5e-5  # Much more conservative for very large molecules
+    elif max_atoms > 50:
+        suggestions['lr'] = 1e-4  # Conservative for large molecules
+    else:
+        suggestions['lr'] = 2e-4
     
     # Diffusion steps
     suggestions['diffusion_steps'] = 500
     
-    # Memory considerations
+    # Memory and stability considerations
+    recommendations = []
     if max_atoms > 100:
-        suggestions['batch_size'] = min(suggestions['batch_size'], 32)
-        suggestions['recommendations'] = [
-            "Large molecules detected. Consider reducing batch size if you encounter memory issues.",
+        suggestions['batch_size'] = min(suggestions['batch_size'], 16)  # Even smaller batch size
+        recommendations.extend([
+            "Very large molecules detected (>100 atoms). Using very conservative settings.",
+            "Reduced learning rate and batch size for numerical stability.",
             "Consider filtering molecules to a smaller maximum size for efficiency.",
-            "Use: python molecular_db_utils.py filter --input_db your_db.db --output_db filtered_db.db --max_atoms 100"
-        ]
+            "Use: python molecular_db_utils.py filter --input_db your_db.db --output_db filtered_db.db --max_atoms 100",
+            "Monitor training closely for gradient explosion or instability."
+        ])
+    elif max_atoms > 50:
+        suggestions['batch_size'] = min(suggestions['batch_size'], 32)
+        recommendations.extend([
+            "Large molecules detected. Using conservative settings.",
+            "Consider reducing batch size further if you encounter memory issues."
+        ])
+    
+    # Add stability recommendations for conditioning
+    if len(good_properties) > 2:
+        recommendations.append(
+            "Multiple conditioning properties detected. Start with 1-2 properties for stability."
+        )
+    
+    if recommendations:
+        suggestions['recommendations'] = recommendations
     
     # Property conditioning suggestions
     good_properties = []
