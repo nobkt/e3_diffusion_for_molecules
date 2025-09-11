@@ -635,6 +635,12 @@ def suggest_training_parameters(analysis):
     # Diffusion steps
     suggestions['diffusion_steps'] = 500
     
+    # Property conditioning suggestions - analyze first
+    good_properties = []
+    for prop, stats in analysis['property_statistics'].items():
+        if stats['coverage'] > 0.8 and stats['std'] > 0.01:  # Good coverage and variance
+            good_properties.append(prop)
+    
     # Memory and stability considerations
     recommendations = []
     if max_atoms > 100:
@@ -661,12 +667,6 @@ def suggest_training_parameters(analysis):
     
     if recommendations:
         suggestions['recommendations'] = recommendations
-    
-    # Property conditioning suggestions
-    good_properties = []
-    for prop, stats in analysis['property_statistics'].items():
-        if stats['coverage'] > 0.8 and stats['std'] > 0.01:  # Good coverage and variance
-            good_properties.append(prop)
     
     if good_properties:
         suggestions['recommended_conditioning'] = good_properties[:3]  # Top 3 properties
