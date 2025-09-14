@@ -235,6 +235,35 @@ def create_optimal_dataset_config(analysis, dataset_name="general_ase_db", with_
     atomic_num_to_symbol, symbol_to_atomic_num = get_comprehensive_element_mapping()
     atomic_nb = [symbol_to_atomic_num[symbol] for symbol in elements if symbol in symbol_to_atomic_num]
     
+    # Compute atom type statistics from element counts
+    atom_types = {}
+    if 'element_counts' in analysis:
+        total_atoms = sum(analysis['element_counts'].values())
+        for symbol in elements:
+            if symbol in analysis['element_counts']:
+                # Map symbol to encoder index and store count
+                encoder_idx = atom_encoder[symbol]
+                atom_types[encoder_idx] = analysis['element_counts'][symbol]
+            else:
+                # If element not found in counts, assign minimal count
+                encoder_idx = atom_encoder[symbol]
+                atom_types[encoder_idx] = 1
+    
+    # Calculate optimal normalization factor for this dataset
+    n_elements = len(elements)
+    
+    # For datasets with many elements, use a smaller normalization factor
+    # This helps prevent noise from disproportionately affecting rare elements
+    if n_elements <= 5:
+        # Original QM9-style normalization for small element sets
+        optimal_categorical_norm = 4.0
+    elif n_elements <= 10:
+        # Moderate reduction for medium element sets  
+        optimal_categorical_norm = 2.0
+    else:
+        # Strong reduction for large element sets to minimize noise impact
+        optimal_categorical_norm = 1.0
+    
     # Create color and radius mappings for visualization
     # Use a diverse set of colors and reasonable atomic radii
     base_colors = [
@@ -274,14 +303,17 @@ def create_optimal_dataset_config(analysis, dataset_name="general_ase_db", with_
         'atomic_nb': atomic_nb,
         'max_n_nodes': analysis['max_atoms'],
         'n_nodes': analysis['molecular_sizes'],
-        'atom_types': {},  # Will be populated during dataset loading
+        'atom_types': atom_types,  # Now properly populated with actual counts
         'distances': [],   # Will be populated if needed
         'colors_dic': colors_dic,
         'radius_dic': radius_dic,
         'with_h': with_h,
         'total_molecules': analysis['total_molecules'],
         'available_properties': analysis['available_properties'],
-        'property_statistics': analysis['property_statistics']
+        'property_statistics': analysis['property_statistics'],
+        # Add normalization recommendations 
+        'recommended_categorical_norm': optimal_categorical_norm,
+        'n_elements': n_elements
     }
     
     return config
@@ -635,6 +667,25 @@ def suggest_training_parameters(analysis):
     # Diffusion steps
     suggestions['diffusion_steps'] = 500
     
+    # CRITICAL FIX: Normalization factors based on element count
+    # This fixes the halogen bias issue
+    if n_elements <= 5:
+        # Original QM9-style for small element sets (H, C, N, O, F)
+        categorical_norm = 4.0
+        normalization_note = "Using QM9-style normalization (few elements)"
+    elif n_elements <= 10:
+        # Moderate reduction for medium element sets 
+        categorical_norm = 2.0
+        normalization_note = "Reduced normalization for medium element diversity"
+    else:
+        # Strong reduction for large element sets to minimize noise impact
+        categorical_norm = 1.0
+        normalization_note = "Minimal normalization for high element diversity"
+    
+    suggestions['normalize_factors'] = [1, categorical_norm, 1]
+    suggestions['categorical_norm_factor'] = categorical_norm
+    suggestions['normalization_note'] = normalization_note
+    
     # Property conditioning suggestions - analyze first
     good_properties = []
     for prop, stats in analysis['property_statistics'].items():
@@ -657,6 +708,21 @@ def suggest_training_parameters(analysis):
         recommendations.extend([
             "Large molecules detected. Using conservative settings.",
             "Consider reducing batch size further if you encounter memory issues."
+        ])
+    
+    # Add normalization-specific recommendations
+    if n_elements > 10:
+        recommendations.extend([
+            f"High element diversity ({n_elements} elements) detected.",
+            f"Using categorical normalization factor of {categorical_norm} to prevent halogen bias.",
+            "This addresses issues where rare elements (like Br, I, Cl) are over-generated.",
+            "The reduced normalization factor minimizes noise impact during diffusion."
+        ])
+    elif n_elements > 5:
+        recommendations.extend([
+            f"Medium element diversity ({n_elements} elements) detected.",
+            f"Using reduced categorical normalization factor of {categorical_norm}.",
+            "This helps balance element generation compared to QM9 defaults."
         ])
     
     # Add stability recommendations for conditioning
@@ -776,6 +842,8 @@ def print_database_summary(db_path, save_summary=False, summary_path=None):
     print(f"  Model size (nf): {suggestions['nf']}")
     print(f"  Layers: {suggestions['n_layers']}")
     print(f"  Learning rate: {suggestions['lr']}")
+    print(f"  Normalization factors: {suggestions['normalize_factors']} # [x, categorical, integer]")
+    print(f"  Note: {suggestions['normalization_note']}")
     
     if 'recommended_conditioning' in suggestions:
         print(f"  Recommended conditioning: {', '.join(suggestions['recommended_conditioning'])}")
@@ -796,6 +864,7 @@ def print_database_summary(db_path, save_summary=False, summary_path=None):
         f"--nf {suggestions['nf']}",
         f"--n_layers {suggestions['n_layers']}",
         f"--lr {suggestions['lr']}",
+        f"--normalize_factors {suggestions['normalize_factors']}",
     ]
     
     if 'recommended_conditioning' in suggestions:

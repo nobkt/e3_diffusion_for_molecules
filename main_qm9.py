@@ -141,6 +141,33 @@ if abs(sum(args.split_ratios) - 1.0) > 1e-6:
 
 dataset_info = get_dataset_info(args.dataset, args.remove_h, getattr(args, 'ase_db_path', None))
 
+# For ASE databases, update normalization factors based on dataset characteristics
+if 'ase_db' in args.dataset and hasattr(dataset_info, 'recommended_categorical_norm'):
+    recommended_norm = dataset_info.get('recommended_categorical_norm', args.normalize_factors[1])
+    original_factors = args.normalize_factors.copy()
+    args.normalize_factors[1] = recommended_norm
+    print(f"Adjusted categorical normalization factor for ASE database:")
+    print(f"  Original factors: {original_factors}")
+    print(f"  Updated factors: {args.normalize_factors}")
+    print(f"  Reason: Dataset has {dataset_info.get('n_elements', 'unknown')} elements")
+elif 'ase_db' in args.dataset:
+    # Fallback logic for ASE databases without explicit recommendations
+    n_elements = len(dataset_info.get('atom_decoder', []))
+    if n_elements > 10:
+        original_factors = args.normalize_factors.copy()
+        args.normalize_factors[1] = 1.0
+        print(f"Applied fallback normalization adjustment for large ASE database:")
+        print(f"  Original factors: {original_factors}")
+        print(f"  Updated factors: {args.normalize_factors}")
+        print(f"  Reason: Dataset has {n_elements} elements")
+    elif n_elements > 5:
+        original_factors = args.normalize_factors.copy()
+        args.normalize_factors[1] = 2.0
+        print(f"Applied fallback normalization adjustment for medium ASE database:")
+        print(f"  Original factors: {original_factors}")
+        print(f"  Updated factors: {args.normalize_factors}")
+        print(f"  Reason: Dataset has {n_elements} elements")
+
 atom_encoder = dataset_info['atom_encoder']
 atom_decoder = dataset_info['atom_decoder']
 

@@ -140,10 +140,11 @@ def update_ase_dataset_config(atoms_list, remove_h=False):
     """
     from configs.datasets_config import ase_db_with_h, ase_db_without_h
     
-    # Get all unique atomic numbers
+    # Get all unique atomic numbers and collect statistics
     all_atomic_numbers = set()
     max_atoms = 0
     n_nodes_count = {}
+    element_counts = {}  # Track actual element frequencies
     
     for atoms in atoms_list:
         atomic_numbers = atoms.numbers
@@ -154,6 +155,10 @@ def update_ase_dataset_config(atoms_list, remove_h=False):
         n_atoms = len(atomic_numbers)
         max_atoms = max(max_atoms, n_atoms)
         n_nodes_count[n_atoms] = n_nodes_count.get(n_atoms, 0) + 1
+        
+        # Count occurrences of each atomic number
+        for atomic_num in atomic_numbers:
+            element_counts[atomic_num] = element_counts.get(atomic_num, 0) + 1
     
     # Create atom mappings using comprehensive element data
     all_atomic_numbers = sorted(list(all_atomic_numbers))
@@ -181,11 +186,23 @@ def update_ase_dataset_config(atoms_list, remove_h=False):
     
     atom_decoder = []
     atom_encoder = {}
+    atom_types = {}  # Map encoder index to count
     
     for i, atomic_num in enumerate(all_atomic_numbers):
         symbol = atomic_num_to_symbol.get(atomic_num, f'X{atomic_num}')
         atom_decoder.append(symbol)
         atom_encoder[symbol] = i
+        # Map encoder index to actual count
+        atom_types[i] = element_counts.get(atomic_num, 0)
+    
+    # Calculate optimal normalization factor
+    n_elements = len(atom_decoder)
+    if n_elements <= 5:
+        optimal_categorical_norm = 4.0
+    elif n_elements <= 10:
+        optimal_categorical_norm = 2.0
+    else:
+        optimal_categorical_norm = 1.0
     
     # Update the appropriate configuration
     config = ase_db_without_h if remove_h else ase_db_with_h
@@ -193,10 +210,12 @@ def update_ase_dataset_config(atoms_list, remove_h=False):
     config['atom_decoder'] = atom_decoder
     config['max_n_nodes'] = max_atoms
     config['n_nodes'] = n_nodes_count
+    config['atom_types'] = atom_types  # Now properly populated
+    config['recommended_categorical_norm'] = optimal_categorical_norm
+    config['n_elements'] = n_elements
     config['is_fallback_config'] = False  # Mark as dynamically updated
     
     # Update colors and radius for visualization (extend if needed)
-    n_types = len(atom_decoder)
     
     # Use a more diverse color palette
     base_colors = [
@@ -238,6 +257,16 @@ def update_ase_dataset_config(atoms_list, remove_h=False):
     
     print(f"Updated ASE dataset config: {len(atom_decoder)} atom types, max {max_atoms} atoms per molecule")
     print(f"Elements found: {', '.join(atom_decoder)}")
+    print(f"Element frequencies: {dict((atom_decoder[i], count) for i, count in atom_types.items())}")
+    print(f"Recommended categorical normalization factor: {optimal_categorical_norm}")
+    
+    # Report element distribution for debugging
+    total_atoms = sum(atom_types.values())
+    print("Element distribution:")
+    for i, symbol in enumerate(atom_decoder):
+        count = atom_types.get(i, 0)
+        percentage = (count / total_atoms * 100) if total_atoms > 0 else 0
+        print(f"  {symbol}: {count:,} atoms ({percentage:.1f}%)")
 
 
 def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=True, remove_h=False):
