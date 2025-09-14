@@ -35,3 +35,11 @@ geom_drugs.sh
 
 # Database test files - exclude from commits
 *.db
+
+# Installation test files
+edm_env/
+test_model.pt
+verification_output.txt
+
+# Docker volumes
+docker-data/

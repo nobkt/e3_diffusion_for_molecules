@@ -4,10 +4,56 @@
 
 Official code release for the paper Equivariant Diffusion for Molecule Generation in 3D.
 
-**If** you want to set-up a rdkit environment, it may be easiest to install conda and run:
-``conda create -c conda-forge -n my-rdkit-env rdkit``
+## 📖 Documentation
 
-and then install the other required packages from there. The code should still run without rdkit installed though.
+- **[📋 Installation Guide](INSTALLATION_GUIDE.md)** - Complete setup instructions with GPU support
+- **[🔧 Troubleshooting](TROUBLESHOOTING.md)** - Solutions to common issues
+- **[⚡ Quick Example](quick_example.py)** - Test your installation
+- **[🐳 Docker Setup](docker-compose.yml)** - Containerized environment
+
+## 🚀 Quick Installation
+
+For complete installation instructions with GPU support, see **[INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md)**.
+
+### Quick Start (Linux/macOS with GPU):
+```bash
+# Clone the repository
+git clone https://github.com/nobkt/e3_diffusion_for_molecules.git
+cd e3_diffusion_for_molecules
+
+# Run automated installation
+chmod +x install.sh
+./install.sh
+
+# Verify installation
+python verify_installation.py
+
+# Test with quick example
+python quick_example.py
+```
+
+### Manual Installation:
+```bash
+# Create conda environment with RDKit
+conda create -c conda-forge -n edm python=3.10 rdkit -y
+conda activate edm
+
+# Install PyTorch with CUDA (adjust for your CUDA version)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# Install dependencies
+pip install -r requirements.txt
+pip install -e .
+```
+
+### Docker Installation:
+```bash
+# Build and run with Docker
+docker-compose up -d e3-diffusion
+docker exec -it e3_diffusion_gpu bash
+```
+
+**Requirements**: Python 3.8-3.11, NVIDIA GPU with CUDA 11.7+, 16GB+ RAM
 
 
 ### Training the EDM:

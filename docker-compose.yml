@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  e3-diffusion:
+    build: .
+    container_name: e3_diffusion_gpu
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./outputs:/workspace/outputs
+      - ./data:/workspace/data
+      - ./experiments:/workspace/experiments
+    ports:
+      - "8888:8888"  # For Jupyter
+      - "6006:6006"  # For TensorBoard
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+    
+  e3-diffusion-jupyter:
+    build: .
+    container_name: e3_diffusion_jupyter
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./outputs:/workspace/outputs
+      - ./data:/workspace/data
+      - ./experiments:/workspace/experiments
+      - ./notebooks:/workspace/notebooks
+    ports:
+      - "8888:8888"
+    command: >
+      bash -c "pip install jupyter &&
+               jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=''"
