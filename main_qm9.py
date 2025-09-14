@@ -199,6 +199,19 @@ data_dummy = next(iter(dataloaders['train']))
 
 if len(args.conditioning) > 0:
     print(f'Conditioning on {args.conditioning}')
+    
+    # Check for potentially problematic conditioning combinations with ASE databases
+    if args.dataset == 'ase_db':
+        binary_features = ['atom_types_encoding', 'functional_groups_encoding']
+        used_binary_features = [f for f in binary_features if f in args.conditioning]
+        if used_binary_features:
+            print(f"Note: Using binary features {used_binary_features} with ASE database.")
+            print("These features use improved normalization for stability.")
+        
+        if len(args.conditioning) > 3:
+            print("Warning: Using many conditioning features may increase training instability.")
+            print("Consider starting with 1-2 features and adding more gradually.")
+    
     property_norms = compute_mean_mad(dataloaders, args.conditioning, args.dataset)
     context_dummy = prepare_context(args.conditioning, data_dummy, property_norms)
     context_node_nf = context_dummy.size(2)
