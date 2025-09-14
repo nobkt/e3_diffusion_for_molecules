@@ -156,9 +156,7 @@ def update_ase_dataset_config(atoms_list, remove_h=False):
         n_nodes_count[n_atoms] = n_nodes_count.get(n_atoms, 0) + 1
     
     # Create atom mappings using comprehensive element data
-    all_atomic_numbers = sorted(list(all_atomic_numbers))
-    
-    # Use ASE's complete element mapping
+    # Convert atomic numbers to symbols first 
     try:
         from ase.data import chemical_symbols
         atomic_num_to_symbol = {}
@@ -179,13 +177,19 @@ def update_ase_dataset_config(atoms_list, remove_h=False):
             79: 'Au', 80: 'Hg', 81: 'Tl', 84: 'Po', 85: 'At', 87: 'Fr', 88: 'Ra'
         }
     
-    atom_decoder = []
-    atom_encoder = {}
-    
-    for i, atomic_num in enumerate(all_atomic_numbers):
+    # Convert atomic numbers to symbols
+    unique_symbols = []
+    for atomic_num in all_atomic_numbers:
         symbol = atomic_num_to_symbol.get(atomic_num, f'X{atomic_num}')
-        atom_decoder.append(symbol)
-        atom_encoder[symbol] = i
+        unique_symbols.append(symbol)
+    
+    # Sort elements alphabetically to match the analysis output
+    # This ensures consistency between analysis reporting and model configuration
+    unique_symbols_sorted = sorted(unique_symbols)
+    
+    # Create mappings based on alphabetically sorted order
+    atom_decoder = unique_symbols_sorted
+    atom_encoder = {symbol: i for i, symbol in enumerate(unique_symbols_sorted)}
     
     # Update the appropriate configuration
     config = ase_db_without_h if remove_h else ase_db_with_h
