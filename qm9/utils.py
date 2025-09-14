@@ -23,18 +23,43 @@ def compute_mean_mad_from_dataloader(dataloader, properties):
             mean = torch.mean(values, dim=0)
             ma = torch.abs(values - mean.unsqueeze(0))
             mad = torch.mean(ma, dim=0)
-            # Use a more reasonable minimum MAD to prevent extreme normalization
-            # Use 1% of the mean absolute value or a minimum of 0.1 for numerical stability
-            min_mad = torch.clamp(torch.abs(mean) * 0.01, min=0.1)
+            
+            # Improved minimum MAD computation for numerical stability
+            # Check if this appears to be a binary feature (values are mostly 0 and 1)
+            is_binary = torch.all((values >= -0.01) & (values <= 1.01))  # Allow small numerical errors
+            unique_vals = torch.unique(values.flatten())
+            is_sparse_binary = is_binary and len(unique_vals) <= 3  # Binary + maybe some noise
+            
+            if is_sparse_binary:
+                # For sparse binary features, use a more conservative minimum MAD
+                # based on sparsity to prevent extreme normalization
+                sparsity = torch.mean(values, dim=0)  # Proportion of 1s (or non-zero values)
+                # Use larger minimum for sparser features, smaller for denser features
+                min_mad = torch.clamp(0.3 + 0.2 * (1.0 - sparsity), min=0.2, max=0.8)
+                print(f"Debug: Binary feature '{property_key}' detected, using adaptive MAD: {torch.mean(min_mad):.3f}")
+            else:
+                # For continuous features, use more conservative minimum
+                min_mad = torch.clamp(torch.abs(mean) * 0.05, min=0.3)
+            
             mad = torch.clamp(mad, min=min_mad)
         else:
-            # For scalar features, use the original logic
+            # For scalar features, use the original logic with improvements
             mean = torch.mean(values)
             ma = torch.abs(values - mean)
             mad = torch.mean(ma)
-            # Use a more reasonable minimum MAD to prevent extreme normalization
-            # Use 1% of the mean absolute value or a minimum of 0.1 for numerical stability
-            min_mad = max(abs(float(mean)) * 0.01, 0.1)
+            
+            # Check if this looks like a binary feature
+            unique_vals = torch.unique(values)
+            is_binary = len(unique_vals) <= 3 and torch.all((values >= -0.01) & (values <= 1.01))
+            
+            if is_binary:
+                # For binary scalar features, use more conservative minimum
+                min_mad = 0.5
+                print(f"Debug: Binary scalar feature '{property_key}' detected, using MAD: {min_mad}")
+            else:
+                # For continuous features, use more conservative minimum
+                min_mad = max(abs(float(mean)) * 0.05, 0.3)
+            
             mad = torch.max(mad, torch.tensor(min_mad))
         
         property_norms[property_key] = {}
@@ -102,10 +127,17 @@ def prepare_context(conditioning, minibatch, property_norms):
             print(f"  Original range: [{torch.min(minibatch[key]):.3f}, {torch.max(minibatch[key]):.3f}]")
             print(f"  Mean: {mean}, MAD: {mad}")
             # Replace NaN/Inf with zeros
-            properties = torch.nan_to_num(properties, nan=0.0, posinf=10.0, neginf=-10.0)
+            properties = torch.nan_to_num(properties, nan=0.0, posinf=5.0, neginf=-5.0)
         
-        # Clamp extreme values to prevent numerical instability
-        properties = torch.clamp(properties, min=-50.0, max=50.0)
+        # More conservative clamping to prevent numerical instability
+        # Use smaller range for better gradient stability
+        properties = torch.clamp(properties, min=-8.0, max=8.0)
+        
+        # Final check and warning for large values that might cause instability
+        max_abs_val = torch.max(torch.abs(properties))
+        if max_abs_val > 5.0:
+            print(f"Warning: Large normalized values in '{key}': max_abs = {max_abs_val:.2f}")
+            print(f"  This might cause training instability. Consider feature engineering.")
         
         if len(properties.size()) == 1:
             # Global feature.

@@ -50,8 +50,9 @@ class Queue():
 def gradient_clipping(flow, gradnorm_queue):
     # Improved gradient clipping with better initialization and bounds
     if len(gradnorm_queue) < 5:
-        # Use a conservative default when we don't have enough history
-        max_grad_norm = 10.0
+        # Use a more conservative default when we don't have enough history
+        # Start with smaller values for better stability with ASE databases
+        max_grad_norm = 1.0
     else:
         # Allow gradient norm to be 150% + 2 * stdev of the recent history.
         queue_mean = gradnorm_queue.mean()
@@ -59,7 +60,8 @@ def gradient_clipping(flow, gradnorm_queue):
         max_grad_norm = 1.5 * queue_mean + 2 * queue_std
         
         # Ensure reasonable bounds: not too small (causes slow training) or too large (instability)
-        max_grad_norm = max(1.0, min(max_grad_norm, 1000.0))
+        # Use more conservative upper bound for ASE databases
+        max_grad_norm = max(0.5, min(max_grad_norm, 100.0))
 
     # Clips gradient and returns the norm
     grad_norm = torch.nn.utils.clip_grad_norm_(
@@ -73,6 +75,8 @@ def gradient_clipping(flow, gradnorm_queue):
               f'while allowed {max_grad_norm:.1f}')
     else:
         gradnorm_queue.add(float(grad_norm))
+
+    return grad_norm
 
     return grad_norm
 

@@ -218,7 +218,11 @@ optim = get_optim(args, model)
 # print(model)
 
 gradnorm_queue = utils.Queue()
-gradnorm_queue.add(3000)  # Add large value that will be flushed.
+# Use smaller initial value for ASE databases to prevent early instability
+if args.dataset == 'ase_db':
+    gradnorm_queue.add(10.0)  # Much smaller initial value for ASE databases
+else:
+    gradnorm_queue.add(3000)  # Original value for QM9
 
 
 def check_mask_correct(variables, node_mask):
