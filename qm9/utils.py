@@ -131,11 +131,11 @@ def prepare_context(conditioning, minibatch, property_norms):
         
         # More conservative clamping to prevent numerical instability
         # Use smaller range for better gradient stability
-        properties = torch.clamp(properties, min=-8.0, max=8.0)
+        properties = torch.clamp(properties, min=-5.0, max=5.0)
         
         # Final check and warning for large values that might cause instability
         max_abs_val = torch.max(torch.abs(properties))
-        if max_abs_val > 5.0:
+        if max_abs_val > 3.0:
             print(f"Warning: Large normalized values in '{key}': max_abs = {max_abs_val:.2f}")
             print(f"  This might cause training instability. Consider feature engineering.")
         

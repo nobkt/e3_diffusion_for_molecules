@@ -147,7 +147,7 @@ class DistributionProperty:
                 i = n_bins - 1
             histogram[i] += 1
         probs = histogram / torch.sum(histogram)
-        probs = Categorical(torch.tensor(probs))
+        probs = Categorical(probs.clone().detach())
         params = [prop_min, prop_max]
         return probs, params
 

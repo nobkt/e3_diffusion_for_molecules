@@ -73,6 +73,11 @@ def gradient_clipping(flow, gradnorm_queue):
         gradnorm_queue.add(float(max_grad_norm))
         print(f'Clipped gradient with value {grad_norm:.1f} '
               f'while allowed {max_grad_norm:.1f}')
+        
+        # Warn about extremely large gradients that indicate numerical instability
+        if float(grad_norm) > 1000.0:
+            print(f'WARNING: Very large gradient norm detected: {grad_norm:.2e}')
+            print('Model may be experiencing numerical instability')
     else:
         gradnorm_queue.add(float(grad_norm))
 
