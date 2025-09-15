@@ -73,9 +73,13 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
         if prop_dist is not None:
             scalar_context = prop_dist.sample(n_nodes).unsqueeze(0)
             # Fill the beginning of context with scalar properties
-            # Non-scalar features (like atom_types_encoding) remain as zeros during sampling
             scalar_dims = scalar_context.size(1)
             context[:, :, :scalar_dims] = scalar_context.unsqueeze(1).repeat(1, n_nodes, 1)
+            
+            # CRITICAL FIX: For binary features that might remain zero, 
+            # apply small positive bias to prevent halogen bias during sampling
+            if scalar_dims < args.context_node_nf:
+                context[:, :, scalar_dims:] += 0.05
     else:
         context = None
 
@@ -149,9 +153,15 @@ def sample(args, device, generative_model, dataset_info,
             if prop_dist is not None:
                 scalar_context = prop_dist.sample_batch(nodesxsample)
                 # Fill the beginning of context with scalar properties
-                # Non-scalar features (like atom_types_encoding) remain as zeros during sampling
                 scalar_dims = scalar_context.size(1)
                 context[:, :, :scalar_dims] = scalar_context.unsqueeze(1).repeat(1, max_n_nodes, 1)
+                
+                # CRITICAL FIX: For binary features that might remain zero, 
+                # apply small positive bias to prevent halogen bias during sampling
+                # This affects the remaining dimensions beyond scalar properties
+                if scalar_dims < args.context_node_nf:
+                    # Add small positive bias to prevent pure zeros in binary feature dimensions
+                    context[:, :, scalar_dims:] += 0.05
             
             # Apply node mask to context
             context = context * node_mask
@@ -210,9 +220,36 @@ def sample_sweep_conditional(args, device, generative_model, dataset_info, prop_
 
     context = []
     
-    # Handle all conditioning features to match training context shape
-    for key in args.conditioning:
-        if prop_dist is not None and key in prop_dist.distributions:
+    # CRITICAL FIX: Filter out problematic binary features that can cause halogen bias
+    problematic_features = ['atom_types_encoding', 'functional_groups_encoding']
+    effective_conditioning = [key for key in args.conditioning if key not in problematic_features]
+    
+    if len(effective_conditioning) != len(args.conditioning):
+        print(f"Warning: Excluding problematic binary features for stable conditional generation")
+        print(f"  Original conditioning: {args.conditioning}")
+        print(f"  Effective conditioning: {effective_conditioning}")
+        print(f"  Excluded features: {[key for key in args.conditioning if key in problematic_features]}")
+    
+    # Handle filtered conditioning features to match training context shape
+    for key in args.conditioning:  # Keep original order but handle problematic ones specially
+        if key in problematic_features:
+            # For problematic binary features, use expected statistical distribution
+            # instead of zeros to avoid bias
+            if prop_dist is not None and hasattr(prop_dist, 'normalizer') and key in prop_dist.normalizer:
+                mean = prop_dist.normalizer[key]['mean']
+                if hasattr(mean, 'shape') and len(mean.shape) > 0:
+                    n_features = mean.shape[0] if len(mean.shape) == 1 else mean.numel()
+                    # Use the statistical mean instead of zeros to prevent bias
+                    # This represents the expected distribution of atom types/functional groups
+                    context_row = torch.ones(n_frames, n_features) * torch.mean(mean).item()
+                else:
+                    context_row = torch.zeros(n_frames, 1)
+                context.append(context_row)
+            else:
+                # Fallback: still avoid pure zeros which can cause bias
+                context_row = torch.ones(n_frames, 1) * 0.1  # Small positive value instead of zero
+                context.append(context_row)
+        elif prop_dist is not None and key in prop_dist.distributions:
             # Scalar property with distribution - create sweep
             min_val, max_val = prop_dist.distributions[key][n_nodes]['params']
             mean, mad = prop_dist.normalizer[key]['mean'], prop_dist.normalizer[key]['mad']

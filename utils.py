@@ -78,10 +78,14 @@ def gradient_clipping(flow, gradnorm_queue):
         if float(grad_norm) > 1000.0:
             print(f'WARNING: Very large gradient norm detected: {grad_norm:.2e}')
             print('Model may be experiencing numerical instability')
+            print('Potential solutions:')
+            print('  - Reduce learning rate (try 1e-4 or 5e-5)')
+            print('  - Use fewer conditioning features (e.g., only molecular_weight)')
+            print('  - Exclude binary features (atom_types_encoding, functional_groups_encoding)')
+            print('  - Reduce batch size')
+            print('  - Check normalization factors are applied correctly')
     else:
         gradnorm_queue.add(float(grad_norm))
-
-    return grad_norm
 
     return grad_norm
 

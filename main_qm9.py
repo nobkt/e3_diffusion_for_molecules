@@ -168,6 +168,22 @@ elif 'ase_db' in args.dataset:
         print(f"  Updated factors: {args.normalize_factors}")
         print(f"  Reason: Dataset has {n_elements} elements")
 
+# CRITICAL FIX: Check for problematic conditioning combinations that can cause halogen bias
+if len(args.conditioning) > 0:
+    problematic_features = ['atom_types_encoding', 'functional_groups_encoding']
+    found_problematic = [feat for feat in args.conditioning if feat in problematic_features]
+    
+    if found_problematic:
+        print(f"⚠️  WARNING: Problematic conditioning features detected!")
+        print(f"  Features: {found_problematic}")
+        print(f"  These binary features can cause halogen bias during conditional generation.")
+        print(f"  Recommendation: Use only scalar features like 'molecular_weight', 'pi_conjugation_ratio'")
+        print(f"  Current conditioning: {args.conditioning}")
+        
+        if len(args.conditioning) > 2:
+            print(f"  Additional warning: Using {len(args.conditioning)} conditioning features may cause instability.")
+            print(f"  Consider starting with 1-2 scalar features: ['molecular_weight'] or ['molecular_weight', 'pi_conjugation_ratio']")
+
 atom_encoder = dataset_info['atom_encoder']
 atom_decoder = dataset_info['atom_decoder']
 
