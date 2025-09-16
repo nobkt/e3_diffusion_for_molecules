@@ -236,6 +236,17 @@ atom_decoder = dataset_info['atom_decoder']
 # args, unparsed_args = parser.parse_known_args()
 args.wandb_usr = utils.get_wandb_username(args.wandb_usr)
 
+# Automatic learning rate adjustment for ASE databases
+if 'ase_db' in args.dataset:
+    original_lr = args.lr
+    # Use lower learning rate for ASE databases to improve stability
+    if args.lr >= 2e-4:  # Only adjust if using default or higher learning rate
+        args.lr = 1e-4  # Reduce to more stable learning rate
+        print(f"Adjusted learning rate for ASE database stability:")
+        print(f"  Original LR: {original_lr}")
+        print(f"  Adjusted LR: {args.lr}")
+        print(f"  Reason: ASE databases often require lower learning rates for stable training")
+
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 device = torch.device("cuda" if args.cuda else "cpu")
 dtype = torch.float32
@@ -347,9 +358,15 @@ optim = get_optim(args, model)
 # print(model)
 
 gradnorm_queue = utils.Queue()
-# Use smaller initial value for ASE databases to prevent early instability
+# Use better initial values for ASE databases based on observed gradient patterns
 if args.dataset == 'ase_db':
-    gradnorm_queue.add(10.0)  # Much smaller initial value for ASE databases
+    # Initialize with multiple values to give better initial statistics
+    # Based on the error log, gradients start high but settle around 50-100
+    gradnorm_queue.add(50.0)  # Better initial value for ASE databases
+    gradnorm_queue.add(30.0)  # Add some variety to initial history
+    gradnorm_queue.add(20.0)
+    gradnorm_queue.add(40.0)
+    gradnorm_queue.add(60.0)  # Now we have 5 values, so adaptive clipping will work
 else:
     gradnorm_queue.add(3000)  # Original value for QM9
 

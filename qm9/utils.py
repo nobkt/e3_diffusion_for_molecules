@@ -72,7 +72,13 @@ def compute_mean_mad_from_dataloader(dataloader, properties):
                 print(f"Debug: Binary scalar feature '{property_key}' detected, using MAD: {min_mad}")
             else:
                 # For continuous features, use more conservative minimum
-                min_mad = max(abs(float(mean)) * 0.05, 0.3)
+                # Special handling for molecular weight which can have very large ranges
+                if property_key == 'molecular_weight':
+                    # Use a percentage-based MAD for molecular weight to handle wide ranges
+                    min_mad = max(abs(float(mean)) * 0.25, mad * 0.5)
+                    print(f"Debug: Molecular weight normalization - mean: {mean:.1f}, original MAD: {mad:.1f}, adjusted MAD: {min_mad:.1f}")
+                else:
+                    min_mad = max(abs(float(mean)) * 0.05, 0.3)
             
             mad = torch.max(mad, torch.tensor(min_mad))
         
@@ -144,14 +150,22 @@ def prepare_context(conditioning, minibatch, property_norms):
             properties = torch.nan_to_num(properties, nan=0.0, posinf=5.0, neginf=-5.0)
         
         # More conservative clamping to prevent numerical instability
-        # Use smaller range for better gradient stability
-        properties = torch.clamp(properties, min=-5.0, max=5.0)
+        # Use smaller range for better gradient stability, but allow larger range for molecular weight
+        if key == 'molecular_weight':
+            # Allow slightly larger range for molecular weight but still constrain for stability
+            properties = torch.clamp(properties, min=-4.0, max=4.0)
+        else:
+            properties = torch.clamp(properties, min=-3.0, max=3.0)
         
         # Final check and warning for large values that might cause instability
         max_abs_val = torch.max(torch.abs(properties))
-        if max_abs_val > 3.0:
+        # Adjust warning threshold based on property type
+        warning_threshold = 3.5 if key == 'molecular_weight' else 2.5
+        if max_abs_val > warning_threshold:
             print(f"Warning: Large normalized values in '{key}': max_abs = {max_abs_val:.2f}")
             print(f"  This might cause training instability. Consider feature engineering.")
+            if key == 'molecular_weight':
+                print(f"  Suggestion: Consider using log(molecular_weight) or molecular_weight^0.5 for better normalization.")
         
         if len(properties.size()) == 1:
             # Global feature.
