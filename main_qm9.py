@@ -20,6 +20,54 @@ import pickle
 from qm9.utils import prepare_context, compute_mean_mad
 from train_test import train_epoch, test, analyze_and_save
 
+def parse_normalize_factors(values):
+    """
+    Parse normalize_factors that can be provided in multiple formats:
+    - "[1, 2, 3]" (single quoted string)
+    - [1, 2, 3] (unquoted, multiple args)
+    - 1 2 3 (space-separated numbers)
+    """
+    if len(values) == 1:
+        # Single argument case - could be quoted list or single value
+        value = values[0]
+        if isinstance(value, str):
+            value = value.strip()
+            if value.startswith('[') and value.endswith(']'):
+                # Properly formatted list string "[1, 2, 3]"
+                try:
+                    return eval(value)
+                except:
+                    pass
+            
+            # Try to parse as comma-separated values "1,2,3"
+            if ',' in value:
+                try:
+                    # Remove brackets if present
+                    value = value.strip('[]')
+                    return [float(x.strip()) if '.' in x.strip() else int(x.strip()) for x in value.split(',')]
+                except:
+                    pass
+            
+            # Single value "1"
+            try:
+                return [float(value) if '.' in value else int(value)]
+            except:
+                pass
+    
+    # Multiple arguments case - [1, 2, 3] split by shell
+    result = []
+    for val in values:
+        val_str = str(val).strip().rstrip(',').strip('[]')
+        try:
+            if '.' in val_str:
+                result.append(float(val_str))
+            else:
+                result.append(int(val_str))
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"Could not parse normalize_factors value: {val}")
+    
+    return result
+
 parser = argparse.ArgumentParser(description='E3Diffusion')
 parser.add_argument('--exp_name', type=str, default='debug_10')
 parser.add_argument('--model', type=str, default='egnn_dynamics',
@@ -110,8 +158,8 @@ parser.add_argument('--ema_decay', type=float, default=0.999,
 parser.add_argument('--augment_noise', type=float, default=0)
 parser.add_argument('--n_stability_samples', type=int, default=500,
                     help='Number of samples to compute the stability')
-parser.add_argument('--normalize_factors', type=eval, default=[1, 4, 1],
-                    help='normalize factors for [x, categorical, integer]')
+parser.add_argument('--normalize_factors', nargs='+', type=str, default=['1', '4', '1'],
+                    help='normalize factors for [x, categorical, integer]. Can be provided as "[1,4,1]" or 1 4 1')
 parser.add_argument('--remove_h', action='store_true')
 parser.add_argument('--include_charges', type=eval, default=True,
                     help='include atom charge or not')
@@ -122,6 +170,9 @@ parser.add_argument('--normalization_factor', type=float, default=1,
 parser.add_argument('--aggregation_method', type=str, default='sum',
                     help='"sum" or "mean"')
 args = parser.parse_args()
+
+# Parse normalize_factors from the command line arguments
+args.normalize_factors = parse_normalize_factors(args.normalize_factors)
 
 # Parse unit conversion for ASE data
 import json
