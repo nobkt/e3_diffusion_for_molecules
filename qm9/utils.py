@@ -17,6 +17,12 @@ def compute_mean_mad_from_dataloader(dataloader, properties):
     for property_key in properties:
         values = dataloader.dataset.data[property_key]
         
+        # Check if this is a properly formatted one-hot encoding
+        is_onehot_atom_types = (property_key == 'atom_types_encoding' and 
+                               dataloader.dataset.data.get('_atom_types_is_onehot', False))
+        is_onehot_functional_groups = (property_key == 'functional_groups_encoding' and 
+                                     dataloader.dataset.data.get('_functional_groups_is_onehot', False))
+        
         # Handle multi-dimensional features by computing norms per feature dimension
         if values.dim() > 1:
             # For multi-dimensional features, compute mean and mad across the batch dimension (dim=0)
@@ -24,24 +30,32 @@ def compute_mean_mad_from_dataloader(dataloader, properties):
             ma = torch.abs(values - mean.unsqueeze(0))
             mad = torch.mean(ma, dim=0)
             
-            # Improved minimum MAD computation for numerical stability
-            # Check if this appears to be a binary feature (values are mostly 0 and 1)
-            is_binary = torch.all((values >= -0.01) & (values <= 1.01))  # Allow small numerical errors
-            unique_vals = torch.unique(values.flatten())
-            is_sparse_binary = is_binary and len(unique_vals) <= 3  # Binary + maybe some noise
-            
-            if is_sparse_binary:
-                # For sparse binary features, use a more conservative minimum MAD
-                # based on sparsity to prevent extreme normalization
-                sparsity = torch.mean(values, dim=0)  # Proportion of 1s (or non-zero values)
-                # Use larger minimum for sparser features, smaller for denser features
-                min_mad = torch.clamp(0.3 + 0.2 * (1.0 - sparsity), min=0.2, max=0.8)
-                print(f"Debug: Binary feature '{property_key}' detected, using adaptive MAD: {torch.mean(min_mad):.3f}")
+            # Special handling for properly formatted one-hot encodings
+            if is_onehot_atom_types or is_onehot_functional_groups:
+                # Use more conservative normalization for one-hot encodings
+                # Since these are normalized probability distributions, use smaller MAD
+                min_mad = torch.clamp(torch.maximum(mean * 0.1, 1.0 - mean) * 0.5, min=0.1, max=0.5)
+                mad = torch.clamp(mad, min=min_mad)
+                print(f"Debug: One-hot encoding '{property_key}' detected, using optimized MAD: {torch.mean(min_mad):.3f}")
             else:
-                # For continuous features, use more conservative minimum
-                min_mad = torch.clamp(torch.abs(mean) * 0.05, min=0.3)
-            
-            mad = torch.clamp(mad, min=min_mad)
+                # Original logic for other multi-dimensional features
+                # Check if this appears to be a binary feature (values are mostly 0 and 1)
+                is_binary = torch.all((values >= -0.01) & (values <= 1.01))  # Allow small numerical errors
+                unique_vals = torch.unique(values.flatten())
+                is_sparse_binary = is_binary and len(unique_vals) <= 3  # Binary + maybe some noise
+                
+                if is_sparse_binary:
+                    # For sparse binary features, use a more conservative minimum MAD
+                    # based on sparsity to prevent extreme normalization
+                    sparsity = torch.mean(values, dim=0)  # Proportion of 1s (or non-zero values)
+                    # Use larger minimum for sparser features, smaller for denser features
+                    min_mad = torch.clamp(0.3 + 0.2 * (1.0 - sparsity), min=0.2, max=0.8)
+                    print(f"Debug: Binary feature '{property_key}' detected, using adaptive MAD: {torch.mean(min_mad):.3f}")
+                else:
+                    # For continuous features, use more conservative minimum
+                    min_mad = torch.clamp(torch.abs(mean) * 0.05, min=0.3)
+                
+                mad = torch.clamp(mad, min=min_mad)
         else:
             # For scalar features, use the original logic with improvements
             mean = torch.mean(values)

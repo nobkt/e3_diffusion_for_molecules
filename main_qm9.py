@@ -225,15 +225,10 @@ if len(args.conditioning) > 0:
     found_problematic = [feat for feat in args.conditioning if feat in problematic_features]
     
     if found_problematic:
-        print(f"⚠️  WARNING: Problematic conditioning features detected!")
-        print(f"  Features: {found_problematic}")
-        print(f"  These binary features can cause halogen bias during conditional generation.")
-        print(f"  Recommendation: Use only scalar features like 'molecular_weight', 'pi_conjugation_ratio'")
-        print(f"  Current conditioning: {args.conditioning}")
-        
-        if len(args.conditioning) > 2:
-            print(f"  Additional warning: Using {len(args.conditioning)} conditioning features may cause instability.")
-            print(f"  Consider starting with 1-2 scalar features: ['molecular_weight'] or ['molecular_weight', 'pi_conjugation_ratio']")
+        # Check if these are properly formatted one-hot encodings after dataset loading
+        # This check will be done later after dataloaders are created
+        print(f"Note: Using binary features {found_problematic} with ASE database.")
+        print(f"These features use improved normalization for stability.")
 
 atom_encoder = dataset_info['atom_encoder']
 atom_decoder = dataset_info['atom_decoder']
@@ -294,13 +289,40 @@ data_dummy = next(iter(dataloaders['train']))
 if len(args.conditioning) > 0:
     print(f'Conditioning on {args.conditioning}')
     
-    # Check for potentially problematic conditioning combinations with ASE databases
+    # Validate binary features for ASE databases after loading
     if args.dataset == 'ase_db':
         binary_features = ['atom_types_encoding', 'functional_groups_encoding']
         used_binary_features = [f for f in binary_features if f in args.conditioning]
+        
         if used_binary_features:
-            print(f"Note: Using binary features {used_binary_features} with ASE database.")
-            print("These features use improved normalization for stability.")
+            # Check if the binary features are properly formatted as one-hot encodings
+            train_data = dataloaders['train'].dataset.data
+            
+            properly_formatted = []
+            problematic = []
+            
+            for feature in used_binary_features:
+                if feature == 'atom_types_encoding':
+                    is_onehot = train_data.get('_atom_types_is_onehot', False)
+                elif feature == 'functional_groups_encoding':
+                    is_onehot = train_data.get('_functional_groups_is_onehot', False)
+                else:
+                    is_onehot = False
+                
+                if is_onehot:
+                    properly_formatted.append(feature)
+                else:
+                    problematic.append(feature)
+            
+            if properly_formatted:
+                print(f"✅ Using properly formatted one-hot encodings: {properly_formatted}")
+                print("These features are optimized for stable conditional generation.")
+            
+            if problematic:
+                print(f"⚠️  WARNING: Problematic conditioning features detected!")
+                print(f"  Features: {problematic}")
+                print(f"  These binary features can cause halogen bias during conditional generation.")
+                print(f"  Recommendation: Use only scalar features like 'molecular_weight', 'pi_conjugation_ratio'")
         
         if len(args.conditioning) > 3:
             print("Warning: Using many conditioning features may increase training instability.")

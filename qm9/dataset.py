@@ -401,23 +401,47 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=T
                 if fg in mol_functional_groups:
                     property_tensors[feature_name][i] = 1.0
     
-    # Also keep the original multi-dimensional encodings for backward compatibility
-    # but mark them as special by adding them to dataset_data directly
-    atom_types_encoding = torch.zeros(n_molecules, max(len(atom_types_sorted), 1), dtype=torch.float32)
+    # Create fixed-length one-hot encodings suitable for generation conditions
+    # These are optimized for stability during conditional generation
+    
+    # For atom types: create a fixed-size encoding with consistent dimensions
+    n_atom_types = max(len(atom_types_sorted), 1)
+    atom_types_encoding = torch.zeros(n_molecules, n_atom_types, dtype=torch.float32)
+    
     if atom_types_sorted:
         for i, mol_atom_types in enumerate(atom_types_list):
+            # Create normalized one-hot representation
+            # Instead of simple binary encoding, use normalized probabilities
             for atom_type in mol_atom_types:
                 if atom_type in atom_types_sorted:
                     idx = atom_types_sorted.index(atom_type)
                     atom_types_encoding[i, idx] = 1.0
+            
+            # Normalize to create probability distribution for better stability
+            # This converts sparse binary vectors to normalized distributions
+            total_types = atom_types_encoding[i].sum()
+            if total_types > 0:
+                atom_types_encoding[i] = atom_types_encoding[i] / total_types
     
-    functional_groups_encoding = torch.zeros(n_molecules, max(len(functional_groups_sorted), 1), dtype=torch.float32)
+    # For functional groups: create a fixed-size encoding with consistent dimensions
+    n_functional_groups = max(len(functional_groups_sorted), 1)
+    functional_groups_encoding = torch.zeros(n_molecules, n_functional_groups, dtype=torch.float32)
+    
     if functional_groups_sorted:
         for i, mol_functional_groups in enumerate(functional_groups_list):
+            # Create normalized one-hot representation
             for fg in mol_functional_groups:
                 if fg in functional_groups_sorted:
                     idx = functional_groups_sorted.index(fg)
                     functional_groups_encoding[i, idx] = 1.0
+            
+            # Normalize to create probability distribution for better stability
+            total_groups = functional_groups_encoding[i].sum()
+            if total_groups > 0:
+                functional_groups_encoding[i] = functional_groups_encoding[i] / total_groups
+            # For molecules with no functional groups, use uniform small probability
+            else:
+                functional_groups_encoding[i] = torch.full((n_functional_groups,), 0.01 / n_functional_groups)
 
     dataset_data = {
         'positions': positions,
@@ -433,6 +457,12 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=T
     # Store the atom types and functional groups mappings for later use
     dataset_data['_atom_types_mapping'] = atom_types_sorted
     dataset_data['_functional_groups_mapping'] = functional_groups_sorted
+    
+    # Mark these as properly formatted one-hot encodings for conditional generation
+    dataset_data['_atom_types_is_onehot'] = True
+    dataset_data['_functional_groups_is_onehot'] = True
+    dataset_data['_atom_types_dimensions'] = n_atom_types
+    dataset_data['_functional_groups_dimensions'] = n_functional_groups
     
     return dataset_data
 
