@@ -23,6 +23,42 @@ def compute_mean_mad_from_dataloader(dataloader, properties):
         is_onehot_functional_groups = (property_key == 'functional_groups_encoding' and 
                                      dataloader.dataset.data.get('_functional_groups_is_onehot', False))
         
+        # Special preprocessing for molecular_weight to improve normalization
+        if property_key == 'molecular_weight':
+            # Apply log transformation to molecular weight for better normalization
+            # This handles the wide distribution (small molecules ~20 u to large molecules ~500+ u)
+            original_values = values.clone()
+            
+            # Ensure all values are positive (add small epsilon if needed)
+            min_val = torch.min(values)
+            if min_val <= 0:
+                values = values - min_val + 1e-6
+                print(f"Debug: Adjusted molecular weight values to be positive (min was {min_val:.3f})")
+            
+            # Apply log transformation
+            log_values = torch.log(values)
+            
+            # Compute normalization on log-transformed values
+            mean = torch.mean(log_values)
+            ma = torch.abs(log_values - mean)
+            mad = torch.mean(ma)
+            
+            # Use more conservative minimum for numerical stability
+            min_mad = max(abs(float(mean)) * 0.1, 0.5)
+            mad = torch.max(mad, torch.tensor(min_mad))
+            
+            print(f"Debug: Molecular weight log transformation - original range: [{original_values.min():.1f}, {original_values.max():.1f}]")
+            print(f"Debug: Log(MW) normalization - mean: {mean:.3f}, MAD: {mad:.3f}")
+            
+            # Store transformation metadata for later use
+            property_norms[property_key] = {
+                'mean': mean,
+                'mad': mad,
+                'transform': 'log',
+                'original_min': min_val.item() if min_val <= 0 else 0.0
+            }
+            continue
+        
         # Handle multi-dimensional features by computing norms per feature dimension
         if values.dim() > 1:
             # For multi-dimensional features, compute mean and mad across the batch dimension (dim=0)
@@ -72,13 +108,7 @@ def compute_mean_mad_from_dataloader(dataloader, properties):
                 print(f"Debug: Binary scalar feature '{property_key}' detected, using MAD: {min_mad}")
             else:
                 # For continuous features, use more conservative minimum
-                # Special handling for molecular weight which can have very large ranges
-                if property_key == 'molecular_weight':
-                    # Use a percentage-based MAD for molecular weight to handle wide ranges
-                    min_mad = max(abs(float(mean)) * 0.25, mad * 0.5)
-                    print(f"Debug: Molecular weight normalization - mean: {mean:.1f}, original MAD: {mad:.1f}, adjusted MAD: {min_mad:.1f}")
-                else:
-                    min_mad = max(abs(float(mean)) * 0.05, 0.3)
+                min_mad = max(abs(float(mean)) * 0.05, 0.3)
             
             mad = torch.max(mad, torch.tensor(min_mad))
         
@@ -130,6 +160,23 @@ def prepare_context(conditioning, minibatch, property_norms):
         mean = property_norms[key]['mean']
         mad = property_norms[key]['mad']
         
+        # Special handling for transformed features (e.g., log-transformed molecular weight)
+        if 'transform' in property_norms[key]:
+            transform_type = property_norms[key]['transform']
+            
+            if transform_type == 'log' and key == 'molecular_weight':
+                # Apply the same transformation that was used during normalization computation
+                original_min_adjustment = property_norms[key].get('original_min', 0.0)
+                
+                # Ensure positive values for log transformation
+                if original_min_adjustment > 0:
+                    properties = properties - original_min_adjustment + 1e-6
+                
+                # Apply log transformation
+                properties = torch.log(torch.clamp(properties, min=1e-6))
+                
+                print(f"Debug: Applied log transformation to '{key}' during context preparation")
+        
         # Apply normalization with proper broadcasting
         if mean.dim() == 0:  # Scalar mean/mad
             properties = (properties - mean) / mad
@@ -150,22 +197,21 @@ def prepare_context(conditioning, minibatch, property_norms):
             properties = torch.nan_to_num(properties, nan=0.0, posinf=5.0, neginf=-5.0)
         
         # More conservative clamping to prevent numerical instability
-        # Use smaller range for better gradient stability, but allow larger range for molecular weight
-        if key == 'molecular_weight':
-            # Allow slightly larger range for molecular weight but still constrain for stability
-            properties = torch.clamp(properties, min=-4.0, max=4.0)
-        else:
-            properties = torch.clamp(properties, min=-3.0, max=3.0)
+        # With log transformation, molecular weight should have much better range
+        properties = torch.clamp(properties, min=-3.0, max=3.0)
         
         # Final check and warning for large values that might cause instability
         max_abs_val = torch.max(torch.abs(properties))
-        # Adjust warning threshold based on property type
-        warning_threshold = 3.5 if key == 'molecular_weight' else 2.5
+        warning_threshold = 2.5  # Unified threshold since log transformation should fix molecular weight
+        
         if max_abs_val > warning_threshold:
             print(f"Warning: Large normalized values in '{key}': max_abs = {max_abs_val:.2f}")
             print(f"  This might cause training instability. Consider feature engineering.")
-            if key == 'molecular_weight':
-                print(f"  Suggestion: Consider using log(molecular_weight) or molecular_weight^0.5 for better normalization.")
+            
+            # Check if this is molecular weight without transformation applied
+            if key == 'molecular_weight' and 'transform' not in property_norms[key]:
+                print(f"  Note: Molecular weight normalization can be improved with log transformation.")
+                print(f"  This is now automatically applied for molecular_weight features.")
         
         if len(properties.size()) == 1:
             # Global feature.
