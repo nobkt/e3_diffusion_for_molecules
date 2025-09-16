@@ -44,11 +44,14 @@ def compute_mean_mad_from_dataloader(dataloader, properties):
             mad = torch.mean(ma)
             
             # Use more conservative minimum for numerical stability
-            min_mad = max(abs(float(mean)) * 0.1, 0.5)
+            # For molecular weight, we need to account for potential outliers
+            # Use a minimum MAD that's proportional to the log range
+            log_range = torch.max(log_values) - torch.min(log_values)
+            min_mad = max(abs(float(mean)) * 0.1, 0.5, float(log_range) * 0.05)
             mad = torch.max(mad, torch.tensor(min_mad))
             
             print(f"Debug: Molecular weight log transformation - original range: [{original_values.min():.1f}, {original_values.max():.1f}]")
-            print(f"Debug: Log(MW) normalization - mean: {mean:.3f}, MAD: {mad:.3f}")
+            print(f"Debug: Log(MW) normalization - mean: {mean:.3f}, MAD: {mad:.3f}, log range: {log_range:.3f}")
             
             # Store transformation metadata for later use
             property_norms[property_key] = {
@@ -196,22 +199,36 @@ def prepare_context(conditioning, minibatch, property_norms):
             # Replace NaN/Inf with zeros
             properties = torch.nan_to_num(properties, nan=0.0, posinf=5.0, neginf=-5.0)
         
-        # More conservative clamping to prevent numerical instability
+        # Conservative clamping to prevent numerical instability
         # With log transformation, molecular weight should have much better range
-        properties = torch.clamp(properties, min=-3.0, max=3.0)
+        properties = torch.clamp(properties, min=-4.0, max=4.0)
         
         # Final check and warning for large values that might cause instability
         max_abs_val = torch.max(torch.abs(properties))
-        warning_threshold = 2.5  # Unified threshold since log transformation should fix molecular weight
+        
+        # Use different thresholds based on whether transformations are applied
+        if key == 'molecular_weight' and 'transform' in property_norms[key]:
+            # For log-transformed molecular weight, use a more lenient threshold
+            warning_threshold = 3.5  # Allow values up to 3.5 since log transformation is applied
+        else:
+            # For other properties, use the original threshold
+            warning_threshold = 2.5
         
         if max_abs_val > warning_threshold:
             print(f"Warning: Large normalized values in '{key}': max_abs = {max_abs_val:.2f}")
             print(f"  This might cause training instability. Consider feature engineering.")
             
-            # Check if this is molecular weight without transformation applied
-            if key == 'molecular_weight' and 'transform' not in property_norms[key]:
-                print(f"  Note: Molecular weight normalization can be improved with log transformation.")
-                print(f"  This is now automatically applied for molecular_weight features.")
+            # Provide specific guidance based on the property type
+            if key == 'molecular_weight':
+                if 'transform' not in property_norms[key]:
+                    print(f"  Suggestion: Log transformation is recommended for molecular_weight")
+                    print(f"              and is now automatically applied for molecular_weight features.")
+                else:
+                    print(f"  Note: Log transformation is already applied. This warning may indicate")
+                    print(f"        extreme outliers in your dataset (very small or very large molecules).")
+                    print(f"        Consider filtering extreme outliers if training becomes unstable.")
+            else:
+                print(f"  Suggestion: Consider feature scaling or transformation for '{key}'.")
         
         if len(properties.size()) == 1:
             # Global feature.
