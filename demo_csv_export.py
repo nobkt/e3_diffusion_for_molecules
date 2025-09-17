@@ -75,13 +75,13 @@ def create_demo_files():
     with open(atom_stats_file, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(["Atom Type Component", "Mean", "Std", "Min", "Max", "Q25", "Q50", "Q75", "Non-zero Count", "Non-zero %"])
-        # Typical for H, C, N, O, F
+        # Updated to use actual element names instead of Component_0, Component_1, etc.
         data = [
-            ("Component_0", "0.125000", "0.235681", "0.000000", "0.800000", "0.000000", "0.000000", "0.200000", 95, "57.23%"),
-            ("Component_1", "0.650000", "0.184521", "0.200000", "1.000000", "0.500000", "0.700000", "0.800000", 166, "100.00%"),
-            ("Component_2", "0.089000", "0.156743", "0.000000", "0.600000", "0.000000", "0.000000", "0.150000", 78, "46.99%"),
-            ("Component_3", "0.076000", "0.142856", "0.000000", "0.500000", "0.000000", "0.000000", "0.120000", 65, "39.16%"),
-            ("Component_4", "0.012000", "0.045231", "0.000000", "0.300000", "0.000000", "0.000000", "0.000000", 8, "4.82%"),
+            ("H", "0.125000", "0.235681", "0.000000", "0.800000", "0.000000", "0.000000", "0.200000", 95, "57.23%"),
+            ("C", "0.650000", "0.184521", "0.200000", "1.000000", "0.500000", "0.700000", "0.800000", 166, "100.00%"),
+            ("N", "0.089000", "0.156743", "0.000000", "0.600000", "0.000000", "0.000000", "0.150000", 78, "46.99%"),
+            ("O", "0.076000", "0.142856", "0.000000", "0.500000", "0.000000", "0.000000", "0.120000", 65, "39.16%"),
+            ("F", "0.012000", "0.045231", "0.000000", "0.300000", "0.000000", "0.000000", "0.000000", 8, "4.82%"),
         ]
         for row in data:
             writer.writerow(row)
@@ -91,16 +91,16 @@ def create_demo_files():
     with open(fg_stats_file, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(["Functional Group Component", "Mean", "Std", "Min", "Max", "Q25", "Q50", "Q75", "Non-zero Count", "Non-zero %"])
-        # Typical functional groups
+        # Updated to use actual SMARTS notation instead of Component_0, Component_1, etc.
         data = [
-            ("Component_0", "0.045000", "0.134521", "0.000000", "0.800000", "0.000000", "0.000000", "0.000000", 23, "13.86%"),
-            ("Component_1", "0.067000", "0.156743", "0.000000", "0.600000", "0.000000", "0.000000", "0.000000", 34, "20.48%"),
-            ("Component_2", "0.032000", "0.098765", "0.000000", "0.500000", "0.000000", "0.000000", "0.000000", 18, "10.84%"),
-            ("Component_3", "0.089000", "0.198432", "0.000000", "0.700000", "0.000000", "0.000000", "0.100000", 42, "25.30%"),
-            ("Component_4", "0.021000", "0.076543", "0.000000", "0.400000", "0.000000", "0.000000", "0.000000", 12, "7.23%"),
-            ("Component_5", "0.156000", "0.234567", "0.000000", "0.900000", "0.000000", "0.000000", "0.300000", 67, "40.36%"),
-            ("Component_6", "0.078000", "0.165432", "0.000000", "0.600000", "0.000000", "0.000000", "0.000000", 35, "21.08%"),
-            ("Component_7", "0.012000", "0.054321", "0.000000", "0.300000", "0.000000", "0.000000", "0.000000", 6, "3.61%"),
+            ("[OH]", "0.045000", "0.134521", "0.000000", "0.800000", "0.000000", "0.000000", "0.000000", 23, "13.86%"),
+            ("[CX3]=[OX1]", "0.067000", "0.156743", "0.000000", "0.600000", "0.000000", "0.000000", "0.000000", 34, "20.48%"),
+            ("[CX3](=O)[OX2H1]", "0.032000", "0.098765", "0.000000", "0.500000", "0.000000", "0.000000", "0.000000", 18, "10.84%"),
+            ("[CX3H1](=O)[#6]", "0.089000", "0.198432", "0.000000", "0.700000", "0.000000", "0.000000", "0.100000", 42, "25.30%"),
+            ("[CX3](=O)([#6])[#6]", "0.021000", "0.076543", "0.000000", "0.400000", "0.000000", "0.000000", "0.000000", 12, "7.23%"),
+            ("[NX3;H2,H1;!$(NC=O)]", "0.156000", "0.234567", "0.000000", "0.900000", "0.000000", "0.000000", "0.300000", 67, "40.36%"),
+            ("[N+](=O)[O-]", "0.078000", "0.165432", "0.000000", "0.600000", "0.000000", "0.000000", "0.000000", 35, "21.08%"),
+            ("[Cl]", "0.012000", "0.054321", "0.000000", "0.300000", "0.000000", "0.000000", "0.000000", 6, "3.61%"),
         ]
         for row in data:
             writer.writerow(row)
@@ -116,10 +116,10 @@ def create_demo_files():
         writer.writerow(["functional_groups_encoding", 166, 9])  # stats + 8 component histograms
     
     # 8. Sample component histogram
-    comp_hist_file = os.path.join(demo_dir, "atom_types_encoding_stats_component_1_histogram.csv")
+    comp_hist_file = os.path.join(demo_dir, "atom_types_encoding_stats_c_histogram.csv")
     with open(comp_hist_file, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["Component_1_Value", "Count"])
+        writer.writerow(["C_Value", "Count"])
         # Carbon is present in most molecules
         data = [
             (0.25, 5), (0.35, 8), (0.45, 12), (0.55, 18), (0.65, 25),
@@ -155,7 +155,16 @@ def show_sample_content(demo_dir):
     print("=" * 55)
     with open(os.path.join(demo_dir, "atom_types_encoding_stats.csv"), 'r') as f:
         lines = f.readlines()
-        for line in lines[:4]:  # Header + first 3 components
+        for line in lines[:4]:  # Header + first 3 elements
+            print(line.strip())
+        if len(lines) > 4:
+            print("...")
+    
+    print("\n2b. Functional Groups Encoding Statistics (first few lines):")
+    print("=" * 65)
+    with open(os.path.join(demo_dir, "functional_groups_encoding_stats.csv"), 'r') as f:
+        lines = f.readlines()
+        for line in lines[:4]:  # Header + first 3 functional groups
             print(line.strip())
         if len(lines) > 4:
             print("...")
