@@ -169,6 +169,10 @@ parser.add_argument('--normalization_factor', type=float, default=1,
                     help="Normalize the sum aggregation of EGNN")
 parser.add_argument('--aggregation_method', type=str, default='sum',
                     help='"sum" or "mean"')
+parser.add_argument('--export_training_stats', action='store_true',
+                    help='Export molecular statistics (molecular_weight, pi_conjugation_ratio, atom_types_encoding, functional_groups_encoding) to CSV files during ASE database training. Only works with --dataset ase_db.')
+parser.add_argument('--stats_output_dir', type=str, default='training_stats',
+                    help='Directory to save CSV statistics files (default: training_stats)')
 args = parser.parse_args()
 
 # Parse normalize_factors from the command line arguments
@@ -296,6 +300,10 @@ dataloaders, charge_scale = dataset.retrieve_dataloaders(args)
 
 data_dummy = next(iter(dataloaders['train']))
 
+# Export training statistics if requested and using ASE database
+if args.export_training_stats and 'ase_db' in args.dataset:
+    export_training_statistics(dataloaders, args, args.stats_output_dir)
+
 
 if len(args.conditioning) > 0:
     print(f'Conditioning on {args.conditioning}')
@@ -375,6 +383,241 @@ def check_mask_correct(variables, node_mask):
     for variable in variables:
         if len(variable) > 0:
             assert_correctly_masked(variable, node_mask)
+
+
+def export_training_statistics(dataloaders, args, output_dir='training_stats'):
+    """
+    Export molecular statistics to CSV files for molecular_weight, pi_conjugation_ratio,
+    atom_types_encoding, and functional_groups_encoding.
+    
+    Parameters:
+    -----------
+    dataloaders : dict
+        Dictionary containing train, valid, test dataloaders
+    args : argparse.Namespace
+        Command line arguments
+    output_dir : str
+        Directory to save CSV files
+    """
+    import os
+    import csv
+    
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    print(f"Exporting training statistics to {output_dir}...")
+    
+    # Initialize data collectors
+    molecular_weights = []
+    pi_conjugation_ratios = []
+    atom_types_data = []
+    functional_groups_data = []
+    
+    # Check what properties are available in the first batch
+    first_batch = next(iter(dataloaders['train']))
+    available_properties = list(first_batch.keys())
+    print(f"Available properties in dataset: {available_properties}")
+    
+    # Analyze training data
+    print("Analyzing training dataset...")
+    train_loader = dataloaders['train']
+    
+    for batch_idx, data in enumerate(train_loader):
+        if batch_idx % 10 == 0:  # Progress indicator
+            print(f"Processing batch {batch_idx + 1}/{len(train_loader)}")
+        
+        batch_size = data['positions'].size(0)
+        
+        for i in range(batch_size):
+            # Extract molecular weight if available
+            if 'molecular_weight' in data:
+                try:
+                    mw = data['molecular_weight'][i].item()
+                    molecular_weights.append(mw)
+                except (AttributeError, IndexError):
+                    pass
+            
+            # Extract pi conjugation ratio if available
+            if 'pi_conjugation_ratio' in data:
+                try:
+                    pi_ratio = data['pi_conjugation_ratio'][i].item()
+                    pi_conjugation_ratios.append(pi_ratio)
+                except (AttributeError, IndexError):
+                    pass
+            
+            # Extract atom types encoding if available
+            if 'atom_types_encoding' in data:
+                try:
+                    atom_encoding = data['atom_types_encoding'][i].cpu().numpy()
+                    atom_types_data.append(atom_encoding)
+                except (AttributeError, IndexError):
+                    pass
+            
+            # Extract functional groups encoding if available
+            if 'functional_groups_encoding' in data:
+                try:
+                    fg_encoding = data['functional_groups_encoding'][i].cpu().numpy()
+                    functional_groups_data.append(fg_encoding)
+                except (AttributeError, IndexError):
+                    pass
+    
+    # Export molecular weight histogram to CSV
+    if molecular_weights:
+        print(f"Exporting molecular weight histogram ({len(molecular_weights)} samples)...")
+        _export_scalar_histogram_csv(
+            molecular_weights, 
+            os.path.join(output_dir, 'molecular_weight_histogram.csv'),
+            'Molecular Weight (u)', 'Count'
+        )
+    else:
+        print("No molecular weight data found - skipping molecular weight export.")
+    
+    # Export pi conjugation ratio histogram to CSV
+    if pi_conjugation_ratios:
+        print(f"Exporting pi conjugation ratio histogram ({len(pi_conjugation_ratios)} samples)...")
+        _export_scalar_histogram_csv(
+            pi_conjugation_ratios,
+            os.path.join(output_dir, 'pi_conjugation_ratio_histogram.csv'),
+            'Pi Conjugation Ratio', 'Count'
+        )
+    else:
+        print("No pi conjugation ratio data found - skipping pi conjugation ratio export.")
+    
+    # Export atom types encoding statistics to CSV
+    if atom_types_data:
+        print(f"Exporting atom types encoding statistics ({len(atom_types_data)} samples)...")
+        _export_encoding_statistics_csv(
+            atom_types_data,
+            os.path.join(output_dir, 'atom_types_encoding_stats.csv'),
+            'Atom Type Component', 'Statistics'
+        )
+    else:
+        print("No atom types encoding data found - skipping atom types encoding export.")
+    
+    # Export functional groups encoding statistics to CSV
+    if functional_groups_data:
+        print(f"Exporting functional groups encoding statistics ({len(functional_groups_data)} samples)...")
+        _export_encoding_statistics_csv(
+            functional_groups_data,
+            os.path.join(output_dir, 'functional_groups_encoding_stats.csv'),
+            'Functional Group Component', 'Statistics'
+        )
+    else:
+        print("No functional groups encoding data found - skipping functional groups encoding export.")
+    
+    print(f"Statistics export completed. Files saved to {output_dir}/")
+    
+    # Create a summary report
+    summary_file = os.path.join(output_dir, 'export_summary.csv')
+    with open(summary_file, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['Property', 'Samples Found', 'Files Generated'])
+        writer.writerow(['molecular_weight', len(molecular_weights), 
+                        2 if molecular_weights else 0])  # histogram + summary
+        writer.writerow(['pi_conjugation_ratio', len(pi_conjugation_ratios), 
+                        2 if pi_conjugation_ratios else 0])  # histogram + summary
+        writer.writerow(['atom_types_encoding', len(atom_types_data), 
+                        (len(atom_types_data[0]) + 1) if atom_types_data else 0])  # stats + component histograms
+        writer.writerow(['functional_groups_encoding', len(functional_groups_data),
+                        (len(functional_groups_data[0]) + 1) if functional_groups_data else 0])  # stats + component histograms
+
+
+def _export_scalar_histogram_csv(values, filename, value_name, count_name, bins=50):
+    """Export histogram of scalar values to CSV."""
+    import csv
+    import numpy as np
+    
+    # Handle edge case of empty values
+    if not values:
+        with open(filename, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow([value_name, count_name])
+        return
+    
+    # Calculate histogram
+    hist_counts, bin_edges = np.histogram(values, bins=bins)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    
+    # Write to CSV
+    with open(filename, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([value_name, count_name])
+        for center, count in zip(bin_centers, hist_counts):
+            writer.writerow([f"{center:.4f}", count])
+    
+    # Also write summary statistics
+    summary_filename = filename.replace('.csv', '_summary.csv')
+    with open(summary_filename, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['Statistic', 'Value'])
+        writer.writerow(['Count', len(values)])
+        if len(values) > 0:
+            writer.writerow(['Mean', f"{np.mean(values):.4f}"])
+            writer.writerow(['Std', f"{np.std(values):.4f}"])
+            writer.writerow(['Min', f"{np.min(values):.4f}"])
+            writer.writerow(['Max', f"{np.max(values):.4f}"])
+            writer.writerow(['Q25', f"{np.percentile(values, 25):.4f}"])
+            writer.writerow(['Q50 (Median)', f"{np.percentile(values, 50):.4f}"])
+            writer.writerow(['Q75', f"{np.percentile(values, 75):.4f}"])
+
+
+def _export_encoding_statistics_csv(encoding_data, filename, component_name, stats_name):
+    """Export statistics for each component of encoding vectors to CSV."""
+    import csv
+    import numpy as np
+    
+    if not encoding_data:
+        # Create empty file with header
+        with open(filename, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow([component_name, 'Mean', 'Std', 'Min', 'Max', 'Q25', 'Q50', 'Q75', 'Non-zero Count', 'Non-zero %'])
+        return
+    
+    # Convert to numpy array for easier processing
+    encoding_array = np.array(encoding_data)  # Shape: (n_molecules, n_components)
+    n_components = encoding_array.shape[1]
+    
+    # Calculate statistics for each component
+    with open(filename, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([component_name, 'Mean', 'Std', 'Min', 'Max', 'Q25', 'Q50', 'Q75', 'Non-zero Count', 'Non-zero %'])
+        
+        for i in range(n_components):
+            component_values = encoding_array[:, i]
+            non_zero_count = np.count_nonzero(component_values)
+            non_zero_percent = (non_zero_count / len(component_values)) * 100
+            
+            writer.writerow([
+                f"Component_{i}",
+                f"{np.mean(component_values):.6f}",
+                f"{np.std(component_values):.6f}",
+                f"{np.min(component_values):.6f}",
+                f"{np.max(component_values):.6f}",
+                f"{np.percentile(component_values, 25):.6f}",
+                f"{np.percentile(component_values, 50):.6f}",
+                f"{np.percentile(component_values, 75):.6f}",
+                non_zero_count,
+                f"{non_zero_percent:.2f}%"
+            ])
+    
+    # Export histograms for each component (only for non-zero components)
+    for i in range(n_components):
+        component_values = encoding_array[:, i]
+        non_zero_mask = component_values > 0
+        
+        if np.any(non_zero_mask):
+            # Only create histogram for components that have non-zero values
+            non_zero_values = component_values[non_zero_mask]
+            component_filename = filename.replace('.csv', f'_component_{i}_histogram.csv')
+            unique_values = len(np.unique(non_zero_values))
+            bins_to_use = min(20, max(1, unique_values))  # Ensure at least 1 bin
+            _export_scalar_histogram_csv(
+                non_zero_values.tolist(),
+                component_filename,
+                f'Component_{i}_Value',
+                'Count',
+                bins=bins_to_use
+            )
 
 
 def main():
