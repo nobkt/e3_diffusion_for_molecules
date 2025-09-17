@@ -326,11 +326,19 @@ def export_training_statistics(dataloaders, args, dataset_info, output_dir='trai
     else:
         print("No pi conjugation ratio data found - skipping pi conjugation ratio export.")
     
-    # Export atom types encoding statistics to CSV
+    # Export atom types encoding per-molecule CSV
     if atom_types_data:
-        print(f"Exporting atom types encoding statistics ({len(atom_types_data)} samples)...")
+        print(f"Exporting atom types encoding per-molecule data ({len(atom_types_data)} samples)...")
         # Get atom type names from dataset_info
         atom_names = dataset_info.get('atom_decoder', [])
+        _export_per_molecule_encoding_csv(
+            atom_types_data,
+            os.path.join(output_dir, 'atom_types_encoding.csv'),
+            component_names=atom_names
+        )
+        
+        # Also export statistics for analysis
+        print(f"Exporting atom types encoding statistics...")
         _export_encoding_statistics_csv(
             atom_types_data,
             os.path.join(output_dir, 'atom_types_encoding_stats.csv'),
@@ -340,11 +348,19 @@ def export_training_statistics(dataloaders, args, dataset_info, output_dir='trai
     else:
         print("No atom types encoding data found - skipping atom types encoding export.")
     
-    # Export functional groups encoding statistics to CSV
+    # Export functional groups encoding per-molecule CSV
     if functional_groups_data:
-        print(f"Exporting functional groups encoding statistics ({len(functional_groups_data)} samples)...")
+        print(f"Exporting functional groups encoding per-molecule data ({len(functional_groups_data)} samples)...")
         # Get functional group SMARTS patterns
         fg_smarts = get_functional_group_smarts_patterns()
+        _export_per_molecule_encoding_csv(
+            functional_groups_data,
+            os.path.join(output_dir, 'functional_groups_encoding.csv'),
+            component_names=fg_smarts
+        )
+        
+        # Also export statistics for analysis
+        print(f"Exporting functional groups encoding statistics...")
         _export_encoding_statistics_csv(
             functional_groups_data,
             os.path.join(output_dir, 'functional_groups_encoding_stats.csv'),
@@ -366,9 +382,9 @@ def export_training_statistics(dataloaders, args, dataset_info, output_dir='trai
         writer.writerow(['pi_conjugation_ratio', len(pi_conjugation_ratios), 
                         2 if pi_conjugation_ratios else 0])  # histogram + summary
         writer.writerow(['atom_types_encoding', len(atom_types_data), 
-                        (len(atom_types_data[0]) + 1) if atom_types_data else 0])  # stats + component histograms
+                        (len(atom_types_data[0]) + 2) if atom_types_data else 0])  # per-molecule + stats + component histograms
         writer.writerow(['functional_groups_encoding', len(functional_groups_data),
-                        (len(functional_groups_data[0]) + 1) if functional_groups_data else 0])  # stats + component histograms
+                        (len(functional_groups_data[0]) + 2) if functional_groups_data else 0])  # per-molecule + stats + component histograms
 
 
 def _export_scalar_histogram_csv(values, filename, value_name, count_name, bins=50):
@@ -408,6 +424,43 @@ def _export_scalar_histogram_csv(values, filename, value_name, count_name, bins=
             writer.writerow(['Q25', f"{np.percentile(values, 25):.4f}"])
             writer.writerow(['Q50 (Median)', f"{np.percentile(values, 50):.4f}"])
             writer.writerow(['Q75', f"{np.percentile(values, 75):.4f}"])
+
+
+def _export_per_molecule_encoding_csv(encoding_data, filename, component_names=None):
+    """Export per-molecule encoding data to CSV with molecules as rows and components as columns."""
+    import csv
+    import numpy as np
+    
+    if not encoding_data:
+        # Create empty file with header
+        with open(filename, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            if component_names:
+                header = ['molecule_id'] + component_names
+            else:
+                header = ['molecule_id']
+            writer.writerow(header)
+        return
+    
+    # Convert to numpy array for easier processing
+    encoding_array = np.array(encoding_data)  # Shape: (n_molecules, n_components)
+    n_molecules, n_components = encoding_array.shape
+    
+    # Create header with component names
+    if component_names and len(component_names) >= n_components:
+        header = ['molecule_id'] + component_names[:n_components]
+    else:
+        header = ['molecule_id'] + [f'Component_{i}' for i in range(n_components)]
+    
+    # Export per-molecule data using csv.writer to properly handle complex column names
+    with open(filename, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile, quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(header)
+        
+        for mol_idx in range(n_molecules):
+            molecule_id = f'mol{mol_idx + 1}'
+            row_data = [molecule_id] + [f"{encoding_array[mol_idx, i]:.6f}" for i in range(n_components)]
+            writer.writerow(row_data)
 
 
 def _export_encoding_statistics_csv(encoding_data, filename, component_name, stats_name, component_names=None):

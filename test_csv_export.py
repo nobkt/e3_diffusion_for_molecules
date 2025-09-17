@@ -175,7 +175,9 @@ def test_full_export_functionality():
             'molecular_weight_histogram_summary.csv',
             'pi_conjugation_ratio_histogram.csv', 
             'pi_conjugation_ratio_histogram_summary.csv',
+            'atom_types_encoding.csv',  # NEW: per-molecule data
             'atom_types_encoding_stats.csv',
+            'functional_groups_encoding.csv',  # NEW: per-molecule data
             'functional_groups_encoding_stats.csv',
             'export_summary.csv'
         ]
@@ -183,6 +185,25 @@ def test_full_export_functionality():
         for expected_file in expected_files:
             file_path = os.path.join(temp_dir, expected_file)
             assert os.path.exists(file_path), f"Expected file {expected_file} was not created"
+        
+        # Check that the new per-molecule files have the correct format
+        atom_per_mol_file = os.path.join(temp_dir, 'atom_types_encoding.csv')
+        with open(atom_per_mol_file, 'r') as f:
+            import csv
+            reader = csv.reader(f)
+            lines = list(reader)
+            assert len(lines) > 1, "Atom types per-molecule file should have data"
+            assert lines[0][0] == 'molecule_id', "First column should be molecule_id"
+            assert lines[1][0] == 'mol1', "First molecule should be mol1"
+        
+        fg_per_mol_file = os.path.join(temp_dir, 'functional_groups_encoding.csv')
+        with open(fg_per_mol_file, 'r') as f:
+            import csv
+            reader = csv.reader(f)
+            lines = list(reader)
+            assert len(lines) > 1, "Functional groups per-molecule file should have data"
+            assert lines[0][0] == 'molecule_id', "First column should be molecule_id"
+            assert lines[1][0] == 'mol1', "First molecule should be mol1"
         
         # Check that component histogram files were created
         all_files = os.listdir(temp_dir)

@@ -1,5 +1,5 @@
 Property,Samples Found,Files Generated
 molecular_weight,169,2
 pi_conjugation_ratio,187,2
-atom_types_encoding,166,6
-functional_groups_encoding,166,9
+atom_types_encoding,166,8
+functional_groups_encoding,166,10

@@ -70,7 +70,45 @@ def create_demo_files():
         writer.writerow(["Q50 (Median)", "0.24"])
         writer.writerow(["Q75", "0.48"])
     
-    # 5. Atom Types Encoding Statistics
+    # 5. Atom Types Encoding Per-Molecule CSV (NEW FORMAT)
+    atom_per_mol_file = os.path.join(demo_dir, "atom_types_encoding.csv")
+    with open(atom_per_mol_file, 'w', newline='') as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(["molecule_id", "H", "C", "N", "O", "F"])
+        # Sample per-molecule data showing the new format
+        sample_data = [
+            ("mol1", 1, 1, 1, 0, 0),
+            ("mol2", 1, 1, 0, 0, 0),
+            ("mol3", 0, 1, 1, 1, 0),
+            ("mol4", 1, 1, 0, 1, 0),
+            ("mol5", 0, 1, 0, 0, 1),
+            ("mol6", 1, 1, 1, 0, 0),
+            ("mol7", 0, 1, 0, 1, 0),
+            ("mol8", 1, 1, 1, 1, 0),
+        ]
+        for row in sample_data:
+            writer.writerow(row)
+    
+    # 6. Functional Groups Encoding Per-Molecule CSV (NEW FORMAT)
+    fg_per_mol_file = os.path.join(demo_dir, "functional_groups_encoding.csv")
+    with open(fg_per_mol_file, 'w', newline='') as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(["molecule_id", "[OH]", "[CX3]=[OX1]", "[CX3](=O)[OX2H1]", "[CX3H1](=O)[#6]", "[NX3;H2,H1;!$(NC=O)]", "[N+](=O)[O-]", "[Cl]", "[Br]"])
+        # Sample per-molecule data showing the new format
+        sample_data = [
+            ("mol1", 0, 1, 0, 0, 0, 0, 0, 0),
+            ("mol2", 1, 0, 0, 0, 0, 0, 0, 0),
+            ("mol3", 0, 0, 0, 1, 0, 0, 0, 0),
+            ("mol4", 0, 0, 1, 0, 0, 0, 0, 0),
+            ("mol5", 0, 0, 0, 0, 1, 0, 0, 0),
+            ("mol6", 0, 1, 0, 0, 0, 1, 0, 0),
+            ("mol7", 0, 0, 0, 0, 0, 0, 1, 0),
+            ("mol8", 1, 0, 0, 0, 1, 0, 0, 0),
+        ]
+        for row in sample_data:
+            writer.writerow(row)
+    
+    # 7. Atom Types Encoding Statistics (LEGACY FORMAT, still generated for analysis)
     atom_stats_file = os.path.join(demo_dir, "atom_types_encoding_stats.csv")
     with open(atom_stats_file, 'w', newline='') as f:
         writer = csv.writer(f)
@@ -86,7 +124,7 @@ def create_demo_files():
         for row in data:
             writer.writerow(row)
     
-    # 6. Functional Groups Encoding Statistics
+    # 8. Functional Groups Encoding Statistics (LEGACY FORMAT, still generated for analysis)
     fg_stats_file = os.path.join(demo_dir, "functional_groups_encoding_stats.csv")
     with open(fg_stats_file, 'w', newline='') as f:
         writer = csv.writer(f)
@@ -105,17 +143,17 @@ def create_demo_files():
         for row in data:
             writer.writerow(row)
     
-    # 7. Export Summary
+    # 9. Export Summary
     summary_file = os.path.join(demo_dir, "export_summary.csv")
     with open(summary_file, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(["Property", "Samples Found", "Files Generated"])
         writer.writerow(["molecular_weight", 169, 2])  # histogram + summary
         writer.writerow(["pi_conjugation_ratio", 187, 2])  # histogram + summary
-        writer.writerow(["atom_types_encoding", 166, 6])  # stats + 5 component histograms
-        writer.writerow(["functional_groups_encoding", 166, 9])  # stats + 8 component histograms
+        writer.writerow(["atom_types_encoding", 166, 8])  # per-molecule CSV + stats + 5 component histograms
+        writer.writerow(["functional_groups_encoding", 166, 10])  # per-molecule CSV + stats + 8 component histograms
     
-    # 8. Sample component histogram
+    # 10. Sample component histogram
     comp_hist_file = os.path.join(demo_dir, "atom_types_encoding_stats_c_histogram.csv")
     with open(comp_hist_file, 'w', newline='') as f:
         writer = csv.writer(f)
@@ -151,23 +189,36 @@ def show_sample_content(demo_dir):
         print(f.read())
     
     # Show atom types encoding stats (first few lines)
-    print("2. Atom Types Encoding Statistics (first few lines):")
+    print("2. Atom Types Encoding Per-Molecule (NEW FORMAT):")
     print("=" * 55)
+    with open(os.path.join(demo_dir, "atom_types_encoding.csv"), 'r') as f:
+        import csv
+        reader = csv.reader(f)
+        lines = list(reader)
+        for i, line in enumerate(lines[:6]):  # Header + first 5 molecules
+            print(f"  {','.join(line)}")
+        if len(lines) > 6:
+            print("  ...")
+    
+    print("\n2b. Functional Groups Encoding Per-Molecule (NEW FORMAT):")
+    print("=" * 65)
+    with open(os.path.join(demo_dir, "functional_groups_encoding.csv"), 'r') as f:
+        import csv
+        reader = csv.reader(f)
+        lines = list(reader)
+        for i, line in enumerate(lines[:6]):  # Header + first 5 molecules
+            print(f"  {','.join(line)}")
+        if len(lines) > 6:
+            print("  ...")
+    
+    print("\n2c. Atom Types Encoding Statistics (LEGACY FORMAT, for analysis):")
+    print("=" * 70)
     with open(os.path.join(demo_dir, "atom_types_encoding_stats.csv"), 'r') as f:
         lines = f.readlines()
         for line in lines[:4]:  # Header + first 3 elements
-            print(line.strip())
+            print(f"  {line.strip()}")
         if len(lines) > 4:
-            print("...")
-    
-    print("\n2b. Functional Groups Encoding Statistics (first few lines):")
-    print("=" * 65)
-    with open(os.path.join(demo_dir, "functional_groups_encoding_stats.csv"), 'r') as f:
-        lines = f.readlines()
-        for line in lines[:4]:  # Header + first 3 functional groups
-            print(line.strip())
-        if len(lines) > 4:
-            print("...")
+            print("  ...")
     
     print("\n3. Export Summary:")
     print("=" * 20)
