@@ -82,22 +82,34 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
         feature_start_idx = 0
         
         # Handle each conditioning feature properly
+        # CRITICAL FIX: Sample all scalar properties at once to get correct dimensions
+        scalar_properties = [feat for feat in args.conditioning if feat in ['molecular_weight', 'pi_conjugation_ratio']]
+        if scalar_properties and prop_dist is not None and hasattr(prop_dist, 'sample'):
+            # Sample all scalar properties at once - returns concatenated tensor
+            all_scalar_samples = prop_dist.sample(n_samples)  # Shape: [n_samples, num_scalar_properties]
+            scalar_idx = 0
+        else:
+            all_scalar_samples = None
+            scalar_idx = 0
+        
         for feat in args.conditioning:
             if feat == 'molecular_weight':
-                # Use a reasonable molecular weight range (log-normalized)
-                if prop_dist is not None and hasattr(prop_dist, 'sample'):
-                    mw_sample = prop_dist.sample(n_samples)
-                    context[:, :, feature_start_idx] = mw_sample.unsqueeze(1).repeat(1, n_nodes)
+                # Use the correct part of the sampled tensor
+                if all_scalar_samples is not None and scalar_idx < all_scalar_samples.size(1):
+                    mw_sample = all_scalar_samples[:, scalar_idx:scalar_idx+1]  # Shape: [n_samples, 1]
+                    context[:, :, feature_start_idx] = mw_sample.repeat(1, n_nodes)
+                    scalar_idx += 1
                 else:
                     # Default to normalized mean (around 0)
                     context[:, :, feature_start_idx] = 0.0
                 feature_start_idx += 1
                 
             elif feat == 'pi_conjugation_ratio':
-                # Use reasonable pi conjugation ratio
-                if prop_dist is not None and hasattr(prop_dist, 'sample'):
-                    pi_sample = prop_dist.sample(n_samples)
-                    context[:, :, feature_start_idx] = pi_sample.unsqueeze(1).repeat(1, n_nodes)
+                # Use the correct part of the sampled tensor
+                if all_scalar_samples is not None and scalar_idx < all_scalar_samples.size(1):
+                    pi_sample = all_scalar_samples[:, scalar_idx:scalar_idx+1]  # Shape: [n_samples, 1]
+                    context[:, :, feature_start_idx] = pi_sample.repeat(1, n_nodes)
+                    scalar_idx += 1
                 else:
                     # Default to small positive value for pi conjugation
                     context[:, :, feature_start_idx] = 0.1

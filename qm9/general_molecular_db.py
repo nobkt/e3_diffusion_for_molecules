@@ -198,6 +198,74 @@ def analyze_ase_database(db_path, include_charges=True, remove_h=False):
     print(f"  - {total_molecules} molecules")
     print(f"  - {len(unique_elements)} unique elements: {', '.join(sorted(unique_elements))}")
     print(f"  - Max atoms per molecule: {max_atoms}")
+    
+    # Add detailed histogram analysis as requested
+    if 'molecular_weight' in property_statistics:
+        mw_stats = property_statistics['molecular_weight']
+        print(f"\nMolecular Weight Analysis:")
+        print(f"  Range: {mw_stats['min']:.1f} - {mw_stats['max']:.1f}")
+        print(f"  Mean: {mw_stats['mean']:.1f} ± {mw_stats['std']:.1f}")
+        
+        # Create histogram bins for molecular weight
+        if 'molecular_weight' in property_values and len(property_values['molecular_weight']) > 0:
+            mw_values = np.array(property_values['molecular_weight'])
+            bins = np.histogram(mw_values, bins=10)
+            print(f"  Histogram (10 bins):")
+            for i, (count, bin_edge) in enumerate(zip(bins[0], bins[1][:-1])):
+                bin_end = bins[1][i+1]
+                print(f"    {bin_edge:.1f}-{bin_end:.1f}: {count} molecules")
+    
+    if 'pi_conjugation_ratio' in property_statistics:
+        pi_stats = property_statistics['pi_conjugation_ratio']
+        print(f"\nPi Conjugation Ratio Analysis:")
+        print(f"  Range: {pi_stats['min']:.3f} - {pi_stats['max']:.3f}")
+        print(f"  Mean: {pi_stats['mean']:.3f} ± {pi_stats['std']:.3f}")
+        
+        # Create histogram bins for pi conjugation ratio
+        if 'pi_conjugation_ratio' in property_values and len(property_values['pi_conjugation_ratio']) > 0:
+            pi_values = np.array(property_values['pi_conjugation_ratio'])
+            bins = np.histogram(pi_values, bins=10)
+            print(f"  Histogram (10 bins):")
+            for i, (count, bin_edge) in enumerate(zip(bins[0], bins[1][:-1])):
+                bin_end = bins[1][i+1]
+                print(f"    {bin_edge:.3f}-{bin_end:.3f}: {count} molecules")
+    
+    # Add atom types encoding information
+    print(f"\nAtom Types Encoding Information:")
+    print(f"  Elements found: {', '.join(sorted(unique_elements))}")
+    element_frequencies = {elem: element_counts[elem] for elem in sorted(unique_elements)}
+    total_atoms = sum(element_counts.values())
+    print(f"  Element frequencies: {element_frequencies}")
+    print(f"  Element distribution:")
+    for elem in sorted(unique_elements):
+        count = element_counts[elem]
+        percentage = (count / total_atoms) * 100
+        print(f"    {elem}: {count:,} atoms ({percentage:.1f}%)")
+    
+    # Add functional groups encoding information (if available)
+    print(f"\nFunctional Groups Encoding Information:")
+    if 'functional_groups_encoding' in available_properties:
+        print(f"  ✅ Functional groups encoding is available in the database")
+        if 'functional_groups_encoding' in property_statistics:
+            fg_stats = property_statistics['functional_groups_encoding']
+            print(f"  Coverage: {fg_stats['coverage']:.1%} of molecules have functional group annotations")
+    else:
+        print(f"  ❌ Functional groups encoding not found in database properties")
+        print(f"  Available properties: {', '.join(sorted(available_properties))}")
+        print(f"  Note: This may be computed dynamically during training")
+    
+    # Add one-hot encoding format explanation  
+    print(f"\nOne-Hot Encoding Format:")
+    print(f"  For atom_types_encoding with elements {sorted(unique_elements)}:")
+    print(f"  Example: Benzene (C6H6) would be encoded as:")
+    example_encoding = [0] * len(unique_elements)
+    if 'H' in unique_elements:
+        example_encoding[sorted(unique_elements).index('H')] = 1
+    if 'C' in unique_elements:
+        example_encoding[sorted(unique_elements).index('C')] = 1
+    print(f"    {example_encoding} (H=1, C=1, others=0)")
+    
+    return analysis
     print(f"  - Available properties: {', '.join(sorted(available_properties))}")
     
     return analysis
