@@ -380,6 +380,28 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=T
     atom_types_sorted = sorted(list(all_atom_types))
     functional_groups_sorted = sorted(list(all_functional_groups))
     
+    # Log the functional groups detection results
+    print(f"\nFunctional groups survey completed:")
+    print(f"  Total molecules processed: {n_molecules}")
+    print(f"  Unique functional groups found: {len(functional_groups_sorted)}")
+    if functional_groups_sorted:
+        print(f"  Functional groups: {functional_groups_sorted}")
+        
+        # Count frequency of each functional group
+        fg_counts = {}
+        for fg_list in functional_groups_list:
+            for fg in fg_list:
+                fg_counts[fg] = fg_counts.get(fg, 0) + 1
+        
+        print("  Functional group frequencies:")
+        for fg in functional_groups_sorted:
+            count = fg_counts.get(fg, 0)
+            percentage = (count / n_molecules) * 100
+            print(f"    {fg}: {count}/{n_molecules} molecules ({percentage:.1f}%)")
+    else:
+        print("  No functional groups detected in any molecule!")
+        print("  This may indicate an issue with molecular structure or functional group detection.")
+    
     # Create individual scalar features for each atom type and functional group
     # This is more compatible with the existing conditioning framework
     

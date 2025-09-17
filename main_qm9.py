@@ -351,12 +351,31 @@ def export_training_statistics(dataloaders, args, dataset_info, output_dir='trai
     # Export functional groups encoding per-molecule CSV
     if functional_groups_data:
         print(f"Exporting functional groups encoding per-molecule data ({len(functional_groups_data)} samples)...")
-        # Get functional group SMARTS patterns
-        fg_smarts = get_functional_group_smarts_patterns()
+        
+        # Try to get the actual functional groups mapping from dataset
+        fg_mapping = None
+        try:
+            train_dataset = dataloaders['train'].dataset.data
+            fg_mapping = train_dataset.get('_functional_groups_mapping', None)
+            if fg_mapping:
+                print(f"Using actual functional groups found in dataset: {fg_mapping}")
+            else:
+                print("No functional groups mapping found in dataset, using default patterns")
+        except Exception as e:
+            print(f"Could not access dataset mapping, using default patterns: {e}")
+        
+        # Use actual mapping if available, otherwise fall back to SMARTS patterns
+        if fg_mapping:
+            component_names = fg_mapping
+        else:
+            # Get functional group SMARTS patterns as fallback
+            fg_smarts = get_functional_group_smarts_patterns()
+            component_names = fg_smarts
+            
         _export_per_molecule_encoding_csv(
             functional_groups_data,
             os.path.join(output_dir, 'functional_groups_encoding.csv'),
-            component_names=fg_smarts
+            component_names=component_names
         )
         
         # Also export statistics for analysis
@@ -365,7 +384,7 @@ def export_training_statistics(dataloaders, args, dataset_info, output_dir='trai
             functional_groups_data,
             os.path.join(output_dir, 'functional_groups_encoding_stats.csv'),
             'Functional Group Component', 'Statistics',
-            component_names=fg_smarts
+            component_names=component_names
         )
     else:
         print("No functional groups encoding data found - skipping functional groups encoding export.")
