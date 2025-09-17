@@ -160,9 +160,14 @@ def test_full_export_functionality():
     
     args = MockArgs()
     
+    # Create mock dataset_info
+    mock_dataset_info = {
+        'atom_decoder': ['H', 'C', 'N', 'O', 'F']  # Example atom types
+    }
+    
     with tempfile.TemporaryDirectory() as temp_dir:
         # Test the full export function
-        export_training_statistics(dataloaders, args, temp_dir)
+        export_training_statistics(dataloaders, args, mock_dataset_info, temp_dir)
         
         # Check that expected files were created
         expected_files = [

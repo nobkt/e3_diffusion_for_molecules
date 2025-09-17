@@ -196,7 +196,37 @@ if abs(sum(args.split_ratios) - 1.0) > 1e-6:
 
 dataset_info = get_dataset_info(args.dataset, args.remove_h, getattr(args, 'ase_db_path', None))
 
-def export_training_statistics(dataloaders, args, output_dir='training_stats'):
+def get_functional_group_smarts_patterns():
+    """
+    Get the SMARTS patterns used for functional group encoding.
+    This should match the patterns used in qm9/openbabel_functions.py
+    
+    Returns:
+        list: List of SMARTS patterns in the order used for encoding
+    """
+    # These patterns match those in qm9/openbabel_functions.py extract_functional_groups_openbabel function
+    functional_group_patterns = {
+        'hydroxyl': '[OH]',        # -OH
+        'carbonyl': '[CX3]=[OX1]', # C=O
+        'carboxyl': '[CX3](=O)[OX2H1]',  # -COOH
+        'aldehyde': '[CX3H1](=O)[#6]',   # -CHO
+        'ketone': '[CX3](=O)([#6])[#6]', # ketone C=O
+        'amino': '[NX3;H2,H1;!$(NC=O)]',  # -NH2, -NH-
+        'nitro': '[N+](=O)[O-]',   # -NO2
+        'chloro': '[Cl]',          # -Cl
+        'bromo': '[Br]',           # -Br
+        'fluoro': '[F]',           # -F
+        'iodo': '[I]',             # -I
+        'methyl': '[CH3]',         # -CH3
+        'methoxy': '[OX2]([#6])[CH3]',  # -OCH3
+        'phenyl': 'c1ccccc1',      # benzene ring
+    }
+    
+    # Return SMARTS patterns in order (the order matters for encoding)
+    return list(functional_group_patterns.values())
+
+
+def export_training_statistics(dataloaders, args, dataset_info, output_dir='training_stats'):
     """
     Export molecular statistics to CSV files for molecular_weight, pi_conjugation_ratio,
     atom_types_encoding, and functional_groups_encoding.
@@ -207,6 +237,8 @@ def export_training_statistics(dataloaders, args, output_dir='training_stats'):
         Dictionary containing train, valid, test dataloaders
     args : argparse.Namespace
         Command line arguments
+    dataset_info : dict
+        Dataset information containing atom_decoder and other metadata
     output_dir : str
         Directory to save CSV files
     """
@@ -297,10 +329,13 @@ def export_training_statistics(dataloaders, args, output_dir='training_stats'):
     # Export atom types encoding statistics to CSV
     if atom_types_data:
         print(f"Exporting atom types encoding statistics ({len(atom_types_data)} samples)...")
+        # Get atom type names from dataset_info
+        atom_names = dataset_info.get('atom_decoder', [])
         _export_encoding_statistics_csv(
             atom_types_data,
             os.path.join(output_dir, 'atom_types_encoding_stats.csv'),
-            'Atom Type Component', 'Statistics'
+            'Atom Type Component', 'Statistics',
+            component_names=atom_names
         )
     else:
         print("No atom types encoding data found - skipping atom types encoding export.")
@@ -308,10 +343,13 @@ def export_training_statistics(dataloaders, args, output_dir='training_stats'):
     # Export functional groups encoding statistics to CSV
     if functional_groups_data:
         print(f"Exporting functional groups encoding statistics ({len(functional_groups_data)} samples)...")
+        # Get functional group SMARTS patterns
+        fg_smarts = get_functional_group_smarts_patterns()
         _export_encoding_statistics_csv(
             functional_groups_data,
             os.path.join(output_dir, 'functional_groups_encoding_stats.csv'),
-            'Functional Group Component', 'Statistics'
+            'Functional Group Component', 'Statistics',
+            component_names=fg_smarts
         )
     else:
         print("No functional groups encoding data found - skipping functional groups encoding export.")
@@ -372,7 +410,7 @@ def _export_scalar_histogram_csv(values, filename, value_name, count_name, bins=
             writer.writerow(['Q75', f"{np.percentile(values, 75):.4f}"])
 
 
-def _export_encoding_statistics_csv(encoding_data, filename, component_name, stats_name):
+def _export_encoding_statistics_csv(encoding_data, filename, component_name, stats_name, component_names=None):
     """Export statistics for each component of encoding vectors to CSV."""
     import csv
     import numpy as np
@@ -398,8 +436,14 @@ def _export_encoding_statistics_csv(encoding_data, filename, component_name, sta
             non_zero_count = np.count_nonzero(component_values)
             non_zero_percent = (non_zero_count / len(component_values)) * 100
             
+            # Use specific component name if provided, otherwise default to Component_i
+            if component_names and i < len(component_names):
+                comp_name = component_names[i]
+            else:
+                comp_name = f"Component_{i}"
+            
             writer.writerow([
-                f"Component_{i}",
+                comp_name,
                 f"{np.mean(component_values):.6f}",
                 f"{np.std(component_values):.6f}",
                 f"{np.min(component_values):.6f}",
@@ -419,13 +463,24 @@ def _export_encoding_statistics_csv(encoding_data, filename, component_name, sta
         if np.any(non_zero_mask):
             # Only create histogram for components that have non-zero values
             non_zero_values = component_values[non_zero_mask]
-            component_filename = filename.replace('.csv', f'_component_{i}_histogram.csv')
+            
+            # Use specific component name if provided, otherwise default to Component_i
+            if component_names and i < len(component_names):
+                comp_name = component_names[i]
+                comp_label = f'{comp_name}_Value'
+                comp_filename_suffix = f'_{comp_name.lower().replace("[", "").replace("]", "").replace("(", "").replace(")", "").replace("=", "").replace("+", "").replace("-", "").replace("#", "").replace(",", "").replace(":", "").replace(";", "").replace("!", "").replace("$", "").replace(" ", "_")}_histogram.csv'
+            else:
+                comp_name = f"Component_{i}"
+                comp_label = f'Component_{i}_Value'
+                comp_filename_suffix = f'_component_{i}_histogram.csv'
+            
+            component_filename = filename.replace('.csv', comp_filename_suffix)
             unique_values = len(np.unique(non_zero_values))
             bins_to_use = min(20, max(1, unique_values))  # Ensure at least 1 bin
             _export_scalar_histogram_csv(
                 non_zero_values.tolist(),
                 component_filename,
-                f'Component_{i}_Value',
+                comp_label,
                 'Count',
                 bins=bins_to_use
             )
@@ -537,7 +592,7 @@ data_dummy = next(iter(dataloaders['train']))
 # Export training statistics if requested and using ASE database
 if args.export_training_stats:
     if 'ase_db' in args.dataset:
-        export_training_statistics(dataloaders, args, args.stats_output_dir)
+        export_training_statistics(dataloaders, args, dataset_info, args.stats_output_dir)
     else:
         print("⚠️  Warning: --export_training_stats flag ignored.")
         print("   This feature only works with ASE databases (--dataset ase_db).")
