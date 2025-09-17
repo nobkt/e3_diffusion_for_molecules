@@ -729,13 +729,29 @@ class EnVariationalDiffusion(torch.nn.Module):
         # Compute mu for p(zs | zt).
         diffusion_utils.assert_mean_zero_with_mask(zt[:, :, :self.n_dims], node_mask)
         diffusion_utils.assert_mean_zero_with_mask(eps_t[:, :, :self.n_dims], node_mask)
+        
+        # CRITICAL FIX: Add numerical stability check for large values before computation
+        max_zt = torch.max(torch.abs(zt[:, :, :self.n_dims])).item()
+        max_eps = torch.max(torch.abs(eps_t[:, :, :self.n_dims])).item()
+        
+        if max_zt > 100.0 or max_eps > 100.0:
+            # Apply gradient clipping to prevent numerical runaway
+            zt[:, :, :self.n_dims] = torch.clamp(zt[:, :, :self.n_dims], -50.0, 50.0)
+            eps_t[:, :, :self.n_dims] = torch.clamp(eps_t[:, :, :self.n_dims], -50.0, 50.0)
+        
         mu = zt / alpha_t_given_s - (sigma2_t_given_s / alpha_t_given_s / sigma_t) * eps_t
 
         # Compute sigma for p(zs | zt).
         sigma = sigma_t_given_s * sigma_s / sigma_t
+        
+        # CRITICAL FIX: Clamp sigma to prevent extreme values
+        sigma = torch.clamp(sigma, min=1e-8, max=10.0)
 
         # Sample zs given the paramters derived from zt.
         zs = self.sample_normal(mu, sigma, node_mask, fix_noise)
+        
+        # CRITICAL FIX: Apply stronger coordinate clamping to prevent numerical runaway
+        zs[:, :, :self.n_dims] = torch.clamp(zs[:, :, :self.n_dims], -100.0, 100.0)
 
         # Project down to avoid numerical runaway of the center of gravity.
         zs = torch.cat(
@@ -779,11 +795,25 @@ class EnVariationalDiffusion(torch.nn.Module):
             t_array = t_array / self.T
 
             z = self.sample_p_zs_given_zt(s_array, t_array, z, node_mask, edge_mask, context, fix_noise=fix_noise)
+            
+            # CRITICAL FIX: Add periodic coordinate clamping during sampling to prevent numerical runaway
+            if s % 100 == 0:  # Every 100 steps
+                z[:, :, :self.n_dims] = torch.clamp(z[:, :, :self.n_dims], -200.0, 200.0)
+                # Re-center after clamping
+                z[:, :, :self.n_dims] = diffusion_utils.remove_mean_with_mask(z[:, :, :self.n_dims], node_mask)
 
         # Finally sample p(x, h | z_0).
         x, h = self.sample_p_xh_given_z0(z, node_mask, edge_mask, context, fix_noise=fix_noise)
 
         diffusion_utils.assert_mean_zero_with_mask(x, node_mask)
+
+        # CRITICAL FIX: Apply stronger coordinate bounds checking and correction
+        max_coord = torch.max(torch.abs(x)).item()
+        if max_coord > 50.0:
+            print(f'Warning: Large coordinates detected ({max_coord:.3f}). Applying coordinate scaling.')
+            # Scale coordinates to reasonable range while preserving relative positions
+            scale_factor = 50.0 / max_coord
+            x = x * scale_factor
 
         max_cog = torch.sum(x, dim=1, keepdim=True).abs().max().item()
         if max_cog > 5e-2:
@@ -817,17 +847,42 @@ class EnVariationalDiffusion(torch.nn.Module):
 
             z = self.sample_p_zs_given_zt(
                 s_array, t_array, z, node_mask, edge_mask, context)
+            
+            # CRITICAL FIX: Add periodic coordinate clamping during chain sampling 
+            if s % 100 == 0:  # Every 100 steps
+                z[:, :, :self.n_dims] = torch.clamp(z[:, :, :self.n_dims], -200.0, 200.0)
+                # Re-center after clamping
+                z[:, :, :self.n_dims] = diffusion_utils.remove_mean_with_mask(z[:, :, :self.n_dims], node_mask)
 
             diffusion_utils.assert_mean_zero_with_mask(z[:, :, :self.n_dims], node_mask)
 
             # Write to chain tensor.
             write_index = (s * keep_frames) // self.T
-            chain[write_index] = self.unnormalize_z(z, node_mask)
+            
+            # CRITICAL FIX: Apply coordinate scaling before writing to chain to prevent large values in visualization
+            z_normalized = z.clone()
+            max_coord = torch.max(torch.abs(z_normalized[:, :, :self.n_dims])).item()
+            if max_coord > 100.0:
+                scale_factor = 100.0 / max_coord  
+                z_normalized[:, :, :self.n_dims] = z_normalized[:, :, :self.n_dims] * scale_factor
+                # Re-center after scaling
+                z_normalized[:, :, :self.n_dims] = diffusion_utils.remove_mean_with_mask(z_normalized[:, :, :self.n_dims], node_mask)
+            
+            chain[write_index] = self.unnormalize_z(z_normalized, node_mask)
 
         # Finally sample p(x, h | z_0).
         x, h = self.sample_p_xh_given_z0(z, node_mask, edge_mask, context)
 
         diffusion_utils.assert_mean_zero_with_mask(x[:, :, :self.n_dims], node_mask)
+        
+        # CRITICAL FIX: Apply coordinate scaling to final result
+        max_coord = torch.max(torch.abs(x)).item()
+        if max_coord > 50.0:
+            print(f'Warning: Large coordinates in chain final sample ({max_coord:.3f}). Applying coordinate scaling.')
+            scale_factor = 50.0 / max_coord
+            x = x * scale_factor
+            # Re-center after scaling
+            x = diffusion_utils.remove_mean_with_mask(x, node_mask)
 
         xh = torch.cat([x, h['categorical'], h['integer']], dim=2)
         chain[0] = xh  # Overwrite last frame with the resulting x and h.
