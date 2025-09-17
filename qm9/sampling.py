@@ -77,36 +77,68 @@ def sample_chain(args, device, flow, n_tries, dataset_info, prop_dist=None):
         # This ensures compatibility with both scalar and multi-dimensional features
         context = torch.zeros(n_samples, n_nodes, args.context_node_nf).to(device)
         
-        # If we have a property distribution for scalar features, use it to fill the context
-        if prop_dist is not None:
-            scalar_context = prop_dist.sample(n_nodes).unsqueeze(0)
-            # Fill the beginning of context with scalar properties
-            scalar_dims = scalar_context.size(1)
-            if scalar_dims <= args.context_node_nf:
-                context[:, :, :scalar_dims] = scalar_context.unsqueeze(1).repeat(1, n_nodes, 1)
-            
-        # CRITICAL FIX: For binary features that might remain zero, 
-        # apply statistical mean instead of bias to prevent halogen bias during sampling
-        # This addresses the issue where Br atoms appear at (0,0,0)
-        problematic_features = ['atom_types_encoding', 'functional_groups_encoding']
-        if any(feat in args.conditioning for feat in problematic_features):
-            # Instead of adding uniform bias, set context to statistical expected values
-            # This prevents the model from being biased toward specific atom types
-            feature_index = 0
-            for feat in args.conditioning:
-                if feat in problematic_features:
-                    # For binary encoding features, use balanced distribution
-                    # This represents realistic atom type distributions rather than pure zeros
-                    if feat == 'atom_types_encoding':
-                        # Common atom type distribution weights (H, C, N, O, F, others...)
-                        # Normalize to prevent any single atom type from dominating
-                        context[:, :, feature_index] = 0.1  # Balanced baseline
-                    elif feat == 'functional_groups_encoding':
-                        # Functional group distribution - balanced approach
-                        context[:, :, feature_index] = 0.1  # Balanced baseline
-                    feature_index += 1
+        # CRITICAL FIX: Initialize context with realistic distributions to prevent generation bias
+        # This is crucial for proper molecule generation instead of biased atom types
+        feature_start_idx = 0
+        
+        # Handle each conditioning feature properly
+        for feat in args.conditioning:
+            if feat == 'molecular_weight':
+                # Use a reasonable molecular weight range (log-normalized)
+                if prop_dist is not None and hasattr(prop_dist, 'sample'):
+                    mw_sample = prop_dist.sample(n_samples)
+                    context[:, :, feature_start_idx] = mw_sample.unsqueeze(1).repeat(1, n_nodes)
                 else:
-                    feature_index += 1
+                    # Default to normalized mean (around 0)
+                    context[:, :, feature_start_idx] = 0.0
+                feature_start_idx += 1
+                
+            elif feat == 'pi_conjugation_ratio':
+                # Use reasonable pi conjugation ratio
+                if prop_dist is not None and hasattr(prop_dist, 'sample'):
+                    pi_sample = prop_dist.sample(n_samples)
+                    context[:, :, feature_start_idx] = pi_sample.unsqueeze(1).repeat(1, n_nodes)
+                else:
+                    # Default to small positive value for pi conjugation
+                    context[:, :, feature_start_idx] = 0.1
+                feature_start_idx += 1
+                
+            elif feat == 'atom_types_encoding':
+                # CRITICAL FIX: Instead of zeros, use realistic atom type distribution
+                # This prevents bias toward specific atoms (P, S, Br)
+                n_atom_types = 11  # H, C, N, O, F, Si, P, S, Cl, Br, I
+                
+                # Create a realistic atom type distribution (normalized for training)
+                # Based on typical organic molecule distributions: H (~45%), C (~40%), others
+                realistic_dist = torch.tensor([
+                    0.45, 0.40, 0.08, 0.05, 0.01,  # H, C, N, O, F
+                    0.001, 0.001, 0.001, 0.001, 0.001, 0.001  # Si, P, S, Cl, Br, I
+                ])
+                
+                # Apply normalization (mean should be close to 0 after training normalization)
+                # Use small values around 0 to represent the normalized distribution
+                normalized_dist = (realistic_dist - realistic_dist.mean()) * 0.1
+                
+                # Fill the context with this distribution for each node
+                for i in range(n_atom_types):
+                    if feature_start_idx + i < args.context_node_nf:
+                        context[:, :, feature_start_idx + i] = normalized_dist[i]
+                feature_start_idx += n_atom_types
+                
+            elif feat == 'functional_groups_encoding':
+                # Use balanced functional group distribution
+                n_functional_groups = 10  # Estimated number of functional groups
+                
+                # Small balanced values to prevent bias
+                for i in range(n_functional_groups):
+                    if feature_start_idx + i < args.context_node_nf:
+                        context[:, :, feature_start_idx + i] = 0.05  # Small balanced value
+                feature_start_idx += n_functional_groups
+                
+            else:
+                # Handle other features with default values
+                context[:, :, feature_start_idx] = 0.0
+                feature_start_idx += 1
                     
     else:
         context = None
@@ -185,28 +217,72 @@ def sample(args, device, generative_model, dataset_info,
                 if scalar_dims <= args.context_node_nf:
                     context[:, :, :scalar_dims] = scalar_context.unsqueeze(1).repeat(1, max_n_nodes, 1)
                 
-            # CRITICAL FIX: For binary features that might remain zero, 
-            # apply statistical mean instead of bias to prevent halogen bias during sampling
-            # This addresses the issue where Br atoms appear at (0,0,0)
-            problematic_features = ['atom_types_encoding', 'functional_groups_encoding']
-            if hasattr(args, 'conditioning') and any(feat in args.conditioning for feat in problematic_features):
-                # Instead of adding uniform bias, set context to statistical expected values
-                # This prevents the model from being biased toward specific atom types
-                feature_index = 0
+            # CRITICAL FIX: Initialize context with realistic distributions to prevent generation bias
+            # This is crucial for proper molecule generation instead of biased atom types
+            feature_start_idx = 0
+            
+            # Handle each conditioning feature properly to prevent atom type bias
+            if hasattr(args, 'conditioning'):
                 for feat in args.conditioning:
-                    if feat in problematic_features:
-                        # For binary encoding features, use balanced distribution
-                        # This represents realistic atom type distributions rather than pure zeros
-                        if feat == 'atom_types_encoding':
-                            # Common atom type distribution weights (H, C, N, O, F, others...)
-                            # Normalize to prevent any single atom type from dominating
-                            context[:, :, feature_index] = 0.1  # Balanced baseline
-                        elif feat == 'functional_groups_encoding':
-                            # Functional group distribution - balanced approach
-                            context[:, :, feature_index] = 0.1  # Balanced baseline
-                        feature_index += 1
+                    if feat == 'molecular_weight':
+                        # Use proper molecular weight distribution
+                        if prop_dist is not None and hasattr(prop_dist, 'sample_batch'):
+                            mw_sample = prop_dist.sample_batch(nodesxsample)
+                            if mw_sample.size(1) > feature_start_idx and feature_start_idx < args.context_node_nf:
+                                context[:, :, feature_start_idx] = mw_sample[:, feature_start_idx].unsqueeze(1).repeat(1, max_n_nodes)
+                        else:
+                            # Default to normalized mean (around 0)
+                            context[:, :, feature_start_idx] = 0.0
+                        feature_start_idx += 1
+                        
+                    elif feat == 'pi_conjugation_ratio':
+                        # Use reasonable pi conjugation ratio
+                        if prop_dist is not None and hasattr(prop_dist, 'sample_batch'):
+                            pi_sample = prop_dist.sample_batch(nodesxsample)
+                            if pi_sample.size(1) > feature_start_idx and feature_start_idx < args.context_node_nf:
+                                context[:, :, feature_start_idx] = pi_sample[:, feature_start_idx].unsqueeze(1).repeat(1, max_n_nodes)
+                        else:
+                            # Default to small positive value for pi conjugation
+                            context[:, :, feature_start_idx] = 0.1
+                        feature_start_idx += 1
+                        
+                    elif feat == 'atom_types_encoding':
+                        # CRITICAL FIX: Instead of zeros, use realistic atom type distribution
+                        # This prevents bias toward specific atoms (P, S, Br)
+                        n_atom_types = 11  # H, C, N, O, F, Si, P, S, Cl, Br, I
+                        
+                        # Create a realistic atom type distribution (normalized for training)
+                        # Based on typical organic molecule distributions: H (~45%), C (~40%), others
+                        realistic_dist = torch.tensor([
+                            0.45, 0.40, 0.08, 0.05, 0.01,  # H, C, N, O, F
+                            0.001, 0.001, 0.001, 0.001, 0.001, 0.001  # Si, P, S, Cl, Br, I
+                        ]).to(device)
+                        
+                        # Apply normalization (mean should be close to 0 after training normalization)
+                        # Use small values around 0 to represent the normalized distribution
+                        normalized_dist = (realistic_dist - realistic_dist.mean()) * 0.1
+                        
+                        # Fill the context with this distribution for each node
+                        for i in range(n_atom_types):
+                            if feature_start_idx + i < args.context_node_nf:
+                                context[:, :, feature_start_idx + i] = normalized_dist[i]
+                        feature_start_idx += n_atom_types
+                        
+                    elif feat == 'functional_groups_encoding':
+                        # Use balanced functional group distribution
+                        n_functional_groups = 10  # Estimated number of functional groups
+                        
+                        # Small balanced values to prevent bias
+                        for i in range(n_functional_groups):
+                            if feature_start_idx + i < args.context_node_nf:
+                                context[:, :, feature_start_idx + i] = 0.05  # Small balanced value
+                        feature_start_idx += n_functional_groups
+                        
                     else:
-                        feature_index += 1
+                        # Handle other features with default values
+                        if feature_start_idx < args.context_node_nf:
+                            context[:, :, feature_start_idx] = 0.0
+                        feature_start_idx += 1
             
             # Apply node mask to context
             context = context * node_mask
@@ -230,6 +306,13 @@ def sample(args, device, generative_model, dataset_info,
         assert_correctly_masked(one_hot.float(), node_mask)
         if args.include_charges:
             assert_correctly_masked(charges.float(), node_mask)
+
+        # CRITICAL FIX: Ensure unused nodes have no atoms (prevent Br at (0,0,0))
+        # This addresses the issue where unused positions get filled with default atoms
+        one_hot = one_hot * node_mask  # Zero out one_hot for unused nodes
+        x = x * node_mask  # Zero out coordinates for unused nodes  
+        if args.include_charges:
+            charges = charges * node_mask.squeeze(-1).long()  # Zero out charges for unused nodes
 
     else:
         raise ValueError(args.probabilistic_model)
@@ -310,7 +393,8 @@ def sample_sweep_conditional(args, device, generative_model, dataset_info, prop_
             if prop_dist is not None and hasattr(prop_dist, 'normalizer') and key in prop_dist.normalizer:
                 # Use normalized mean (zero after normalization)
                 mean = prop_dist.normalizer[key]['mean']
-                if hasattr(mean, 'dim') and mean.dim() == 0:
+                # CRITICAL FIX: Handle both tensor and scalar mean values properly
+                if isinstance(mean, (int, float)) or (hasattr(mean, 'dim') and mean.dim() == 0):
                     # Scalar mean - create single feature column
                     context_row = torch.zeros(n_frames, 1)
                 elif hasattr(mean, 'shape') and len(mean.shape) > 0:

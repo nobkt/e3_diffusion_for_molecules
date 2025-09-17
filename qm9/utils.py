@@ -181,11 +181,12 @@ def prepare_context(conditioning, minibatch, property_norms):
                 print(f"Debug: Applied log transformation to '{key}' during context preparation")
         
         # Apply normalization with proper broadcasting
-        if mean.dim() == 0:  # Scalar mean/mad
+        # CRITICAL FIX: Handle both tensor and scalar mean/mad values
+        if isinstance(mean, (int, float)) or (hasattr(mean, 'dim') and mean.dim() == 0):  # Scalar mean/mad
             properties = (properties - mean) / mad
         else:  # Multi-dimensional mean/mad
-            # Ensure proper broadcasting
-            if properties.dim() == 2 and mean.dim() == 1:
+            # Ensure proper broadcasting for tensors
+            if properties.dim() == 2 and hasattr(mean, 'dim') and mean.dim() == 1:
                 # properties: (batch_size, n_features), mean/mad: (n_features,)
                 properties = (properties - mean.unsqueeze(0)) / mad.unsqueeze(0)
             else:
