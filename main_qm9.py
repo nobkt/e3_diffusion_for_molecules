@@ -301,8 +301,13 @@ dataloaders, charge_scale = dataset.retrieve_dataloaders(args)
 data_dummy = next(iter(dataloaders['train']))
 
 # Export training statistics if requested and using ASE database
-if args.export_training_stats and 'ase_db' in args.dataset:
-    export_training_statistics(dataloaders, args, args.stats_output_dir)
+if args.export_training_stats:
+    if 'ase_db' in args.dataset:
+        export_training_statistics(dataloaders, args, args.stats_output_dir)
+    else:
+        print("⚠️  Warning: --export_training_stats flag ignored.")
+        print("   This feature only works with ASE databases (--dataset ase_db).")
+        print("   For QM9 datasets, use the existing analysis tools in qm9/analyze.py")
 
 
 if len(args.conditioning) > 0:
