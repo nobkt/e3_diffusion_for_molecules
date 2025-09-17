@@ -196,200 +196,6 @@ if abs(sum(args.split_ratios) - 1.0) > 1e-6:
 
 dataset_info = get_dataset_info(args.dataset, args.remove_h, getattr(args, 'ase_db_path', None))
 
-# For ASE databases, update normalization factors based on dataset characteristics
-if 'ase_db' in args.dataset and hasattr(dataset_info, 'recommended_categorical_norm'):
-    recommended_norm = dataset_info.get('recommended_categorical_norm', args.normalize_factors[1])
-    original_factors = args.normalize_factors.copy()
-    args.normalize_factors[1] = recommended_norm
-    print(f"Adjusted categorical normalization factor for ASE database:")
-    print(f"  Original factors: {original_factors}")
-    print(f"  Updated factors: {args.normalize_factors}")
-    print(f"  Reason: Dataset has {dataset_info.get('n_elements', 'unknown')} elements")
-elif 'ase_db' in args.dataset:
-    # Fallback logic for ASE databases without explicit recommendations
-    n_elements = len(dataset_info.get('atom_decoder', []))
-    if n_elements > 10:
-        original_factors = args.normalize_factors.copy()
-        args.normalize_factors[1] = 1.0
-        print(f"Applied fallback normalization adjustment for large ASE database:")
-        print(f"  Original factors: {original_factors}")
-        print(f"  Updated factors: {args.normalize_factors}")
-        print(f"  Reason: Dataset has {n_elements} elements")
-    elif n_elements > 5:
-        original_factors = args.normalize_factors.copy()
-        args.normalize_factors[1] = 2.0
-        print(f"Applied fallback normalization adjustment for medium ASE database:")
-        print(f"  Original factors: {original_factors}")
-        print(f"  Updated factors: {args.normalize_factors}")
-        print(f"  Reason: Dataset has {n_elements} elements")
-
-# CRITICAL FIX: Check for problematic conditioning combinations that can cause halogen bias
-if len(args.conditioning) > 0:
-    problematic_features = ['atom_types_encoding', 'functional_groups_encoding']
-    found_problematic = [feat for feat in args.conditioning if feat in problematic_features]
-    
-    if found_problematic:
-        # Check if these are properly formatted one-hot encodings after dataset loading
-        # This check will be done later after dataloaders are created
-        print(f"Note: Using binary features {found_problematic} with ASE database.")
-        print(f"These features use improved normalization for stability.")
-
-atom_encoder = dataset_info['atom_encoder']
-atom_decoder = dataset_info['atom_decoder']
-
-# args, unparsed_args = parser.parse_known_args()
-args.wandb_usr = utils.get_wandb_username(args.wandb_usr)
-
-# Automatic learning rate adjustment for ASE databases
-if 'ase_db' in args.dataset:
-    original_lr = args.lr
-    # Use lower learning rate for ASE databases to improve stability
-    if args.lr >= 2e-4:  # Only adjust if using default or higher learning rate
-        args.lr = 1e-4  # Reduce to more stable learning rate
-        print(f"Adjusted learning rate for ASE database stability:")
-        print(f"  Original LR: {original_lr}")
-        print(f"  Adjusted LR: {args.lr}")
-        print(f"  Reason: ASE databases often require lower learning rates for stable training")
-
-args.cuda = not args.no_cuda and torch.cuda.is_available()
-device = torch.device("cuda" if args.cuda else "cpu")
-dtype = torch.float32
-
-if args.resume is not None:
-    exp_name = args.exp_name + '_resume'
-    start_epoch = args.start_epoch
-    resume = args.resume
-    wandb_usr = args.wandb_usr
-    normalization_factor = args.normalization_factor
-    aggregation_method = args.aggregation_method
-
-    with open(join(args.resume, 'args.pickle'), 'rb') as f:
-        args = pickle.load(f)
-
-    args.resume = resume
-    args.break_train_epoch = False
-
-    args.exp_name = exp_name
-    args.start_epoch = start_epoch
-    args.wandb_usr = wandb_usr
-
-    # Careful with this -->
-    if not hasattr(args, 'normalization_factor'):
-        args.normalization_factor = normalization_factor
-    if not hasattr(args, 'aggregation_method'):
-        args.aggregation_method = aggregation_method
-
-    print(args)
-
-utils.create_folders(args)
-# print(args)
-
-
-# Wandb config
-if args.no_wandb:
-    mode = 'disabled'
-else:
-    mode = 'online' if args.online else 'offline'
-kwargs = {'entity': args.wandb_usr, 'name': args.exp_name, 'project': 'e3_diffusion', 'config': args,
-          'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': mode}
-wandb.init(**kwargs)
-wandb.save('*.txt')
-
-# Retrieve QM9 dataloaders
-dataloaders, charge_scale = dataset.retrieve_dataloaders(args)
-
-data_dummy = next(iter(dataloaders['train']))
-
-# Export training statistics if requested and using ASE database
-if args.export_training_stats:
-    if 'ase_db' in args.dataset:
-        export_training_statistics(dataloaders, args, args.stats_output_dir)
-    else:
-        print("⚠️  Warning: --export_training_stats flag ignored.")
-        print("   This feature only works with ASE databases (--dataset ase_db).")
-        print("   For QM9 datasets, use the existing analysis tools in qm9/analyze.py")
-
-
-if len(args.conditioning) > 0:
-    print(f'Conditioning on {args.conditioning}')
-    
-    # Validate binary features for ASE databases after loading
-    if args.dataset == 'ase_db':
-        binary_features = ['atom_types_encoding', 'functional_groups_encoding']
-        used_binary_features = [f for f in binary_features if f in args.conditioning]
-        
-        if used_binary_features:
-            # Check if the binary features are properly formatted as one-hot encodings
-            train_data = dataloaders['train'].dataset.data
-            
-            properly_formatted = []
-            problematic = []
-            
-            for feature in used_binary_features:
-                if feature == 'atom_types_encoding':
-                    is_onehot = train_data.get('_atom_types_is_onehot', False)
-                elif feature == 'functional_groups_encoding':
-                    is_onehot = train_data.get('_functional_groups_is_onehot', False)
-                else:
-                    is_onehot = False
-                
-                if is_onehot:
-                    properly_formatted.append(feature)
-                else:
-                    problematic.append(feature)
-            
-            if properly_formatted:
-                print(f"✅ Using properly formatted one-hot encodings: {properly_formatted}")
-                print("These features are optimized for stable conditional generation.")
-            
-            if problematic:
-                print(f"⚠️  WARNING: Problematic conditioning features detected!")
-                print(f"  Features: {problematic}")
-                print(f"  These binary features can cause halogen bias during conditional generation.")
-                print(f"  Recommendation: Use only scalar features like 'molecular_weight', 'pi_conjugation_ratio'")
-        
-        if len(args.conditioning) > 3:
-            print("Warning: Using many conditioning features may increase training instability.")
-            print("Consider starting with 1-2 features and adding more gradually.")
-    
-    property_norms = compute_mean_mad(dataloaders, args.conditioning, args.dataset)
-    context_dummy = prepare_context(args.conditioning, data_dummy, property_norms)
-    context_node_nf = context_dummy.size(2)
-else:
-    context_node_nf = 0
-    property_norms = None
-
-args.context_node_nf = context_node_nf
-
-
-# Create EGNN flow
-model, nodes_dist, prop_dist = get_model(args, device, dataset_info, dataloaders['train'])
-if prop_dist is not None:
-    prop_dist.set_normalizer(property_norms)
-model = model.to(device)
-optim = get_optim(args, model)
-# print(model)
-
-gradnorm_queue = utils.Queue()
-# Use better initial values for ASE databases based on observed gradient patterns
-if args.dataset == 'ase_db':
-    # Initialize with multiple values to give better initial statistics
-    # Based on the error log, gradients start high but settle around 50-100
-    gradnorm_queue.add(50.0)  # Better initial value for ASE databases
-    gradnorm_queue.add(30.0)  # Add some variety to initial history
-    gradnorm_queue.add(20.0)
-    gradnorm_queue.add(40.0)
-    gradnorm_queue.add(60.0)  # Now we have 5 values, so adaptive clipping will work
-else:
-    gradnorm_queue.add(3000)  # Original value for QM9
-
-
-def check_mask_correct(variables, node_mask):
-    for variable in variables:
-        if len(variable) > 0:
-            assert_correctly_masked(variable, node_mask)
-
-
 def export_training_statistics(dataloaders, args, output_dir='training_stats'):
     """
     Export molecular statistics to CSV files for molecular_weight, pi_conjugation_ratio,
@@ -623,6 +429,200 @@ def _export_encoding_statistics_csv(encoding_data, filename, component_name, sta
                 'Count',
                 bins=bins_to_use
             )
+
+# For ASE databases, update normalization factors based on dataset characteristics
+if 'ase_db' in args.dataset and hasattr(dataset_info, 'recommended_categorical_norm'):
+    recommended_norm = dataset_info.get('recommended_categorical_norm', args.normalize_factors[1])
+    original_factors = args.normalize_factors.copy()
+    args.normalize_factors[1] = recommended_norm
+    print(f"Adjusted categorical normalization factor for ASE database:")
+    print(f"  Original factors: {original_factors}")
+    print(f"  Updated factors: {args.normalize_factors}")
+    print(f"  Reason: Dataset has {dataset_info.get('n_elements', 'unknown')} elements")
+elif 'ase_db' in args.dataset:
+    # Fallback logic for ASE databases without explicit recommendations
+    n_elements = len(dataset_info.get('atom_decoder', []))
+    if n_elements > 10:
+        original_factors = args.normalize_factors.copy()
+        args.normalize_factors[1] = 1.0
+        print(f"Applied fallback normalization adjustment for large ASE database:")
+        print(f"  Original factors: {original_factors}")
+        print(f"  Updated factors: {args.normalize_factors}")
+        print(f"  Reason: Dataset has {n_elements} elements")
+    elif n_elements > 5:
+        original_factors = args.normalize_factors.copy()
+        args.normalize_factors[1] = 2.0
+        print(f"Applied fallback normalization adjustment for medium ASE database:")
+        print(f"  Original factors: {original_factors}")
+        print(f"  Updated factors: {args.normalize_factors}")
+        print(f"  Reason: Dataset has {n_elements} elements")
+
+# CRITICAL FIX: Check for problematic conditioning combinations that can cause halogen bias
+if len(args.conditioning) > 0:
+    problematic_features = ['atom_types_encoding', 'functional_groups_encoding']
+    found_problematic = [feat for feat in args.conditioning if feat in problematic_features]
+    
+    if found_problematic:
+        # Check if these are properly formatted one-hot encodings after dataset loading
+        # This check will be done later after dataloaders are created
+        print(f"Note: Using binary features {found_problematic} with ASE database.")
+        print(f"These features use improved normalization for stability.")
+
+atom_encoder = dataset_info['atom_encoder']
+atom_decoder = dataset_info['atom_decoder']
+
+# args, unparsed_args = parser.parse_known_args()
+args.wandb_usr = utils.get_wandb_username(args.wandb_usr)
+
+# Automatic learning rate adjustment for ASE databases
+if 'ase_db' in args.dataset:
+    original_lr = args.lr
+    # Use lower learning rate for ASE databases to improve stability
+    if args.lr >= 2e-4:  # Only adjust if using default or higher learning rate
+        args.lr = 1e-4  # Reduce to more stable learning rate
+        print(f"Adjusted learning rate for ASE database stability:")
+        print(f"  Original LR: {original_lr}")
+        print(f"  Adjusted LR: {args.lr}")
+        print(f"  Reason: ASE databases often require lower learning rates for stable training")
+
+args.cuda = not args.no_cuda and torch.cuda.is_available()
+device = torch.device("cuda" if args.cuda else "cpu")
+dtype = torch.float32
+
+if args.resume is not None:
+    exp_name = args.exp_name + '_resume'
+    start_epoch = args.start_epoch
+    resume = args.resume
+    wandb_usr = args.wandb_usr
+    normalization_factor = args.normalization_factor
+    aggregation_method = args.aggregation_method
+
+    with open(join(args.resume, 'args.pickle'), 'rb') as f:
+        args = pickle.load(f)
+
+    args.resume = resume
+    args.break_train_epoch = False
+
+    args.exp_name = exp_name
+    args.start_epoch = start_epoch
+    args.wandb_usr = wandb_usr
+
+    # Careful with this -->
+    if not hasattr(args, 'normalization_factor'):
+        args.normalization_factor = normalization_factor
+    if not hasattr(args, 'aggregation_method'):
+        args.aggregation_method = aggregation_method
+
+    print(args)
+
+utils.create_folders(args)
+# print(args)
+
+
+# Wandb config
+if args.no_wandb:
+    mode = 'disabled'
+else:
+    mode = 'online' if args.online else 'offline'
+kwargs = {'entity': args.wandb_usr, 'name': args.exp_name, 'project': 'e3_diffusion', 'config': args,
+          'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': mode}
+wandb.init(**kwargs)
+wandb.save('*.txt')
+
+# Retrieve QM9 dataloaders
+dataloaders, charge_scale = dataset.retrieve_dataloaders(args)
+
+data_dummy = next(iter(dataloaders['train']))
+
+# Export training statistics if requested and using ASE database
+if args.export_training_stats:
+    if 'ase_db' in args.dataset:
+        export_training_statistics(dataloaders, args, args.stats_output_dir)
+    else:
+        print("⚠️  Warning: --export_training_stats flag ignored.")
+        print("   This feature only works with ASE databases (--dataset ase_db).")
+        print("   For QM9 datasets, use the existing analysis tools in qm9/analyze.py")
+
+
+if len(args.conditioning) > 0:
+    print(f'Conditioning on {args.conditioning}')
+    
+    # Validate binary features for ASE databases after loading
+    if args.dataset == 'ase_db':
+        binary_features = ['atom_types_encoding', 'functional_groups_encoding']
+        used_binary_features = [f for f in binary_features if f in args.conditioning]
+        
+        if used_binary_features:
+            # Check if the binary features are properly formatted as one-hot encodings
+            train_data = dataloaders['train'].dataset.data
+            
+            properly_formatted = []
+            problematic = []
+            
+            for feature in used_binary_features:
+                if feature == 'atom_types_encoding':
+                    is_onehot = train_data.get('_atom_types_is_onehot', False)
+                elif feature == 'functional_groups_encoding':
+                    is_onehot = train_data.get('_functional_groups_is_onehot', False)
+                else:
+                    is_onehot = False
+                
+                if is_onehot:
+                    properly_formatted.append(feature)
+                else:
+                    problematic.append(feature)
+            
+            if properly_formatted:
+                print(f"✅ Using properly formatted one-hot encodings: {properly_formatted}")
+                print("These features are optimized for stable conditional generation.")
+            
+            if problematic:
+                print(f"⚠️  WARNING: Problematic conditioning features detected!")
+                print(f"  Features: {problematic}")
+                print(f"  These binary features can cause halogen bias during conditional generation.")
+                print(f"  Recommendation: Use only scalar features like 'molecular_weight', 'pi_conjugation_ratio'")
+        
+        if len(args.conditioning) > 3:
+            print("Warning: Using many conditioning features may increase training instability.")
+            print("Consider starting with 1-2 features and adding more gradually.")
+    
+    property_norms = compute_mean_mad(dataloaders, args.conditioning, args.dataset)
+    context_dummy = prepare_context(args.conditioning, data_dummy, property_norms)
+    context_node_nf = context_dummy.size(2)
+else:
+    context_node_nf = 0
+    property_norms = None
+
+args.context_node_nf = context_node_nf
+
+
+# Create EGNN flow
+model, nodes_dist, prop_dist = get_model(args, device, dataset_info, dataloaders['train'])
+if prop_dist is not None:
+    prop_dist.set_normalizer(property_norms)
+model = model.to(device)
+optim = get_optim(args, model)
+# print(model)
+
+gradnorm_queue = utils.Queue()
+# Use better initial values for ASE databases based on observed gradient patterns
+if args.dataset == 'ase_db':
+    # Initialize with multiple values to give better initial statistics
+    # Based on the error log, gradients start high but settle around 50-100
+    gradnorm_queue.add(50.0)  # Better initial value for ASE databases
+    gradnorm_queue.add(30.0)  # Add some variety to initial history
+    gradnorm_queue.add(20.0)
+    gradnorm_queue.add(40.0)
+    gradnorm_queue.add(60.0)  # Now we have 5 values, so adaptive clipping will work
+else:
+    gradnorm_queue.add(3000)  # Original value for QM9
+
+
+def check_mask_correct(variables, node_mask):
+    for variable in variables:
+        if len(variable) > 0:
+            assert_correctly_masked(variable, node_mask)
+
 
 
 def main():
