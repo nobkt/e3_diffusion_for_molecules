@@ -181,7 +181,7 @@ class DistributionProperty:
     def sample_batch(self, nodesxsample):
         vals = []
         for n_nodes in nodesxsample:
-            vals.append(self.sample(int(n_nodes)).unsqueeze(0))
+            vals.append(self.sample(int(n_nodes)))  # Remove extra .unsqueeze(0) since sample() now returns 2D
         vals = torch.cat(vals, dim=0)
         return vals
 
