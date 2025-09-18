@@ -174,7 +174,9 @@ class DistributionProperty:
             val = self.normalize_tensor(val, prop)
             vals.append(val)
         vals = torch.cat(vals)
-        return vals
+        # CRITICAL FIX: Return 2D tensor [1, num_properties] instead of 1D tensor [num_properties]
+        # This fixes IndexError: Dimension out of range when accessing .size(1)
+        return vals.unsqueeze(0)
 
     def sample_batch(self, nodesxsample):
         vals = []
