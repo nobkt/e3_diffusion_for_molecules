@@ -134,30 +134,77 @@ geom_no_h = {
     'with_h': False}
 
 
-# ASE database configurations - these can be dynamically updated based on actual data
+# ASE database configurations - these are dynamically updated based on actual data
+# Extended default coverage for more comprehensive element support
 ase_db_with_h = {
     'name': 'ase_db',
-    'atom_encoder': {'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4, 'P': 5, 'S': 6, 'Cl': 7, 'Br': 8, 'I': 9},  # Common atoms, will be updated
-    'atom_decoder': ['H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Br', 'I'],  # Will be updated based on actual data
+    # Extended atom encoder with common elements found in molecular databases
+    'atom_encoder': {
+        'H': 0, 'He': 1, 'Li': 2, 'Be': 3, 'B': 4, 'C': 5, 'N': 6, 'O': 7, 'F': 8, 'Ne': 9,
+        'Na': 10, 'Mg': 11, 'Al': 12, 'Si': 13, 'P': 14, 'S': 15, 'Cl': 16, 'Ar': 17, 'K': 18, 'Ca': 19,
+        'Sc': 20, 'Ti': 21, 'V': 22, 'Cr': 23, 'Mn': 24, 'Fe': 25, 'Co': 26, 'Ni': 27, 'Cu': 28, 'Zn': 29,
+        'Ga': 30, 'Ge': 31, 'As': 32, 'Se': 33, 'Br': 34, 'Kr': 35, 'Rb': 36, 'Sr': 37, 'Y': 38, 'Zr': 39,
+        'Nb': 40, 'Mo': 41, 'Tc': 42, 'Ru': 43, 'Rh': 44, 'Pd': 45, 'Ag': 46, 'Cd': 47, 'In': 48, 'Sn': 49,
+        'Sb': 50, 'Te': 51, 'I': 52, 'Xe': 53, 'Cs': 54, 'Ba': 55, 'La': 56, 'Ce': 57, 'Pr': 58, 'Nd': 59,
+        'Pm': 60, 'Sm': 61, 'Eu': 62, 'Gd': 63, 'Tb': 64, 'Dy': 65, 'Ho': 66, 'Er': 67, 'Tm': 68, 'Yb': 69,
+        'Lu': 70, 'Hf': 71, 'Ta': 72, 'W': 73, 'Re': 74, 'Os': 75, 'Ir': 76, 'Pt': 77, 'Au': 78, 'Hg': 79,
+        'Tl': 80, 'Pb': 81, 'Bi': 82, 'Po': 83, 'At': 84, 'Rn': 85, 'Fr': 86, 'Ra': 87, 'Ac': 88, 'Th': 89,
+        'Pa': 90, 'U': 91, 'Np': 92, 'Pu': 93, 'Am': 94, 'Cm': 95, 'Bk': 96, 'Cf': 97, 'Es': 98, 'Fm': 99
+    },
+    'atom_decoder': [
+        'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne',
+        'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar', 'K', 'Ca',
+        'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn',
+        'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr', 'Rb', 'Sr', 'Y', 'Zr',
+        'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'In', 'Sn',
+        'Sb', 'Te', 'I', 'Xe', 'Cs', 'Ba', 'La', 'Ce', 'Pr', 'Nd',
+        'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb',
+        'Lu', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg',
+        'Tl', 'Pb', 'Bi', 'Po', 'At', 'Rn', 'Fr', 'Ra', 'Ac', 'Th',
+        'Pa', 'U', 'Np', 'Pu', 'Am', 'Cm', 'Bk', 'Cf', 'Es', 'Fm'
+    ],  # Will be updated based on actual data
     'max_n_nodes': 100,  # Default, will be updated based on actual data
     'n_nodes': {},  # Will be populated based on actual data
     'atom_types': {},  # Will be populated based on actual data
     'distances': [],  # Will be populated based on actual data if needed
-    'colors_dic': ['#FFFFFF99', 'C7', 'C0', 'C3', 'C1', 'C2', 'C4', 'C5', 'C6', 'C8'],
-    'radius_dic': [0.46, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77],
+    'colors_dic': ['#FFFFFF99'] + [f'C{i}' for i in range(100)],  # Extended color palette
+    'radius_dic': [0.46] + [0.77] * 99,  # Extended radius palette
     'with_h': True
 }
 
 ase_db_without_h = {
     'name': 'ase_db',
-    'atom_encoder': {'C': 0, 'N': 1, 'O': 2, 'F': 3, 'P': 4, 'S': 5, 'Cl': 6, 'Br': 7, 'I': 8},  # Common non-H atoms
-    'atom_decoder': ['C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Br', 'I'],  # Will be updated based on actual data
+    # Extended atom encoder without hydrogen (same as above but excluding H)
+    'atom_encoder': {
+        'He': 0, 'Li': 1, 'Be': 2, 'B': 3, 'C': 4, 'N': 5, 'O': 6, 'F': 7, 'Ne': 8,
+        'Na': 9, 'Mg': 10, 'Al': 11, 'Si': 12, 'P': 13, 'S': 14, 'Cl': 15, 'Ar': 16, 'K': 17, 'Ca': 18,
+        'Sc': 19, 'Ti': 20, 'V': 21, 'Cr': 22, 'Mn': 23, 'Fe': 24, 'Co': 25, 'Ni': 26, 'Cu': 27, 'Zn': 28,
+        'Ga': 29, 'Ge': 30, 'As': 31, 'Se': 32, 'Br': 33, 'Kr': 34, 'Rb': 35, 'Sr': 36, 'Y': 37, 'Zr': 38,
+        'Nb': 39, 'Mo': 40, 'Tc': 41, 'Ru': 42, 'Rh': 43, 'Pd': 44, 'Ag': 45, 'Cd': 46, 'In': 47, 'Sn': 48,
+        'Sb': 49, 'Te': 50, 'I': 51, 'Xe': 52, 'Cs': 53, 'Ba': 54, 'La': 55, 'Ce': 56, 'Pr': 57, 'Nd': 58,
+        'Pm': 59, 'Sm': 60, 'Eu': 61, 'Gd': 62, 'Tb': 63, 'Dy': 64, 'Ho': 65, 'Er': 66, 'Tm': 67, 'Yb': 68,
+        'Lu': 69, 'Hf': 70, 'Ta': 71, 'W': 72, 'Re': 73, 'Os': 74, 'Ir': 75, 'Pt': 76, 'Au': 77, 'Hg': 78,
+        'Tl': 79, 'Pb': 80, 'Bi': 81, 'Po': 82, 'At': 83, 'Rn': 84, 'Fr': 85, 'Ra': 86, 'Ac': 87, 'Th': 88,
+        'Pa': 89, 'U': 90, 'Np': 91, 'Pu': 92, 'Am': 93, 'Cm': 94, 'Bk': 95, 'Cf': 96, 'Es': 97, 'Fm': 98
+    },
+    'atom_decoder': [
+        'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne',
+        'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar', 'K', 'Ca',
+        'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn',
+        'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr', 'Rb', 'Sr', 'Y', 'Zr',
+        'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'In', 'Sn',
+        'Sb', 'Te', 'I', 'Xe', 'Cs', 'Ba', 'La', 'Ce', 'Pr', 'Nd',
+        'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb',
+        'Lu', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg',
+        'Tl', 'Pb', 'Bi', 'Po', 'At', 'Rn', 'Fr', 'Ra', 'Ac', 'Th',
+        'Pa', 'U', 'Np', 'Pu', 'Am', 'Cm', 'Bk', 'Cf', 'Es', 'Fm'
+    ],  # Will be updated based on actual data
     'max_n_nodes': 100,  # Default, will be updated based on actual data
     'n_nodes': {},  # Will be populated based on actual data
     'atom_types': {},  # Will be populated based on actual data
     'distances': [],  # Will be populated based on actual data if needed
-    'colors_dic': ['C7', 'C0', 'C3', 'C1', 'C2', 'C4', 'C5', 'C6', 'C8'],
-    'radius_dic': [0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77, 0.77],
+    'colors_dic': [f'C{i}' for i in range(99)],  # Extended color palette (no white for H)
+    'radius_dic': [0.77] * 99,  # Extended radius palette
     'with_h': False
 }
 
