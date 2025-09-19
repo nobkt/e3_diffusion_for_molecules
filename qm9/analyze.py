@@ -235,8 +235,9 @@ def check_stability(positions, atom_type, dataset_info, debug=False):
                 order = bond_analyze.geom_predictor(
                     (atom_decoder[pair[0]], atom_decoder[pair[1]]), dist)
             elif dataset_info['name'] == 'ase_db':
-                # For ASE database, use the same bond analysis as QM9
-                order = bond_analyze.get_bond_order(atom1, atom2, dist)
+                # For ASE database, use the same bond analysis as QM9 but with check_exists=True
+                # to handle missing bond entries for atoms not in the original QM9 bond dictionaries
+                order = bond_analyze.get_bond_order(atom1, atom2, dist, check_exists=True)
             else:
                 # Default case - use QM9 bond analysis
                 order = bond_analyze.get_bond_order(atom1, atom2, dist)
