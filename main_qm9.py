@@ -194,6 +194,13 @@ wandb.save('*.txt')
 # Retrieve QM9 dataloaders
 dataloaders, charge_scale = dataset.retrieve_dataloaders(args)
 
+# Update normalization factors for ASE databases
+if 'ase_db' in args.dataset and hasattr(args, 'ase_coord_norm_factor'):
+    # Use computed coordinate normalization factor for ASE data
+    print(f"Using ASE coordinate normalization factor: {args.ase_coord_norm_factor}")
+    args.normalize_factors = [args.ase_coord_norm_factor, 4, 1]
+    print(f"Updated normalize_factors to: {args.normalize_factors}")
+
 data_dummy = next(iter(dataloaders['train']))
 
 

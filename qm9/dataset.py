@@ -33,6 +33,8 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
         Number of unique atomic species
     charge_scale : float
         Scale factor for charges (compatibility with QM9)
+    coord_norm_factor : float
+        Coordinate normalization factor for proper scaling
     """
     try:
         from ase.db import connect
@@ -66,6 +68,9 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
     
     # Convert ASE atoms to the required format
     dataset_data = convert_ase_to_dataset_format(all_atoms, all_properties, include_charges, remove_h)
+    
+    # Compute coordinate normalization factor
+    coord_norm_factor = compute_ase_coordinate_normalization(dataset_data)
     
     # Update dataset configuration based on actual data
     update_ase_dataset_config(all_atoms, remove_h)
@@ -124,7 +129,52 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
     num_species = len(all_species)
     charge_scale = torch.max(all_species).item()  # For compatibility
     
-    return processed_datasets, num_species, charge_scale
+    return processed_datasets, num_species, charge_scale, coord_norm_factor
+
+
+def compute_ase_coordinate_normalization(dataset_data):
+    """
+    Compute appropriate coordinate normalization factors for ASE data.
+    
+    Parameters
+    ----------
+    dataset_data : dict
+        Dataset data containing positions
+        
+    Returns
+    -------
+    float
+        Coordinate normalization factor (standard deviation of coordinates)
+    """
+    positions = dataset_data['positions']  # Shape: [n_molecules, max_atoms, 3]
+    atom_mask = torch.ones_like(positions[:, :, 0])  # Default mask if not available
+    
+    # Create proper atom mask if num_atoms is available
+    if 'num_atoms' in dataset_data:
+        num_atoms = dataset_data['num_atoms']
+        atom_mask = torch.zeros_like(positions[:, :, 0])
+        for i, n in enumerate(num_atoms):
+            atom_mask[i, :n] = 1.0
+    
+    # Extract valid coordinates (masked)
+    valid_coords = positions[atom_mask.unsqueeze(-1).expand_as(positions) == 1]
+    
+    if len(valid_coords) == 0:
+        print("Warning: No valid coordinates found, using default normalization factor 1.0")
+        return 1.0
+    
+    # Compute standard deviation of all coordinates
+    coord_std = torch.std(valid_coords).item()
+    
+    # Ensure we don't get too small values that could cause numerical issues
+    coord_std = max(coord_std, 0.1)
+    
+    print(f"Computed coordinate normalization factor: {coord_std:.4f}")
+    print(f"Coordinate statistics: mean={torch.mean(torch.abs(valid_coords)):.4f}, "
+          f"std={torch.std(valid_coords):.4f}, "
+          f"max={torch.max(torch.abs(valid_coords)):.4f}")
+    
+    return coord_std
 
 
 def update_ase_dataset_config(atoms_list, remove_h=False):
@@ -409,13 +459,16 @@ def retrieve_dataloaders(cfg):
         filter_n_atoms = cfg.filter_n_atoms
         
         # Load from ASE database
-        datasets, num_species, charge_scale = load_ase_database(
+        datasets, num_species, charge_scale, coord_norm_factor = load_ase_database(
             cfg.ase_db_path,
             split_ratios=getattr(cfg, 'split_ratios', (0.8, 0.1, 0.1)),
             seed=getattr(cfg, 'seed', 42),
             include_charges=cfg.include_charges,
             remove_h=cfg.remove_h
         )
+        
+        # Store coordinate normalization factor for use in model
+        cfg.ase_coord_norm_factor = coord_norm_factor
         
         # Convert units if needed (ASE typically uses eV, Angstrom)
         # You might need to adjust these conversion factors based on your data
