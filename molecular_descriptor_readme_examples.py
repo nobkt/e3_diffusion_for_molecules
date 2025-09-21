@@ -70,7 +70,7 @@ def show_training_examples(db_path):
     print("\n1. Train a Conditional EDM (equivalent to README example)")
     print("-" * 60)
     print("Original README command:")
-    print("python main_qm9.py --exp_name exp_cond_alpha --model egnn_dynamics --lr 1e-4 --nf 192 --n_layers 9 --save_model True --diffusion_steps 1000 --sin_embedding False --n_epochs 3000 --n_stability_samples 500 --diffusion_noise_schedule polynomial_2 --diffusion_noise_precision 1e-5 --dequantization deterministic --include_charges False --diffusion_loss_type l2 --batch_size 64 --normalize_factors [1,8,1] --conditioning alpha --dataset qm9_second_half")
+    print("python main_qm9.py --exp_name exp_cond_alpha --model egnn_dynamics --lr 1e-4 --nf 192 --n_layers 9 --save_model True --diffusion_steps 1000 --sin_embedding False --n_epochs 3000 --n_stability_samples 500 --diffusion_noise_schedule polynomial_2 --diffusion_noise_precision 1e-5 --dequantization deterministic --include_charges False --diffusion_loss_type l2 --batch_size 64 --normalize_factors 1 8 1 --conditioning alpha --dataset qm9_second_half")
     
     print("\nNEW: Molecular descriptor conditioning command:")
     cmd = f"""python main_qm9.py \\
@@ -90,7 +90,7 @@ def show_training_examples(db_path):
     --include_charges False \\
     --diffusion_loss_type l2 \\
     --batch_size 64 \\
-    --normalize_factors [1,8,1] \\
+    --normalize_factors 1 8 1 \\
     --conditioning molecular_weight pi_conjugation_ratio atom_types_encoding functional_groups_encoding \\
     --dataset ase_db \\
     --ase_db_path {db_path}"""

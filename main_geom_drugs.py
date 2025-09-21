@@ -100,7 +100,7 @@ parser.add_argument('--ema_decay', type=float, default=0,           # TODO
 parser.add_argument('--augment_noise', type=float, default=0)
 parser.add_argument('--n_stability_samples', type=int, default=20,
                     help='Number of samples to compute the stability')
-parser.add_argument('--normalize_factors', type=eval, default=[1, 4, 10],
+parser.add_argument('--normalize_factors', nargs=3, type=float, default=[1, 4, 10],
                     help='normalize factors for [x, categorical, integer]')
 parser.add_argument('--remove_h', action='store_true')
 parser.add_argument('--include_charges', type=eval, default=False, help='include atom charge or not')
