@@ -195,11 +195,17 @@ wandb.save('*.txt')
 dataloaders, charge_scale = dataset.retrieve_dataloaders(args)
 
 # Update normalization factors for ASE databases
-if 'ase_db' in args.dataset and hasattr(args, 'ase_coord_norm_factor'):
-    # Use computed coordinate normalization factor for ASE data
-    print(f"Using ASE coordinate normalization factor: {args.ase_coord_norm_factor}")
-    args.normalize_factors = [args.ase_coord_norm_factor, 4, 1]
-    print(f"Updated normalize_factors to: {args.normalize_factors}")
+if 'ase_db' in args.dataset:
+    if hasattr(args, 'ase_coord_norm_factor'):
+        # Use computed coordinate normalization factor for ASE data
+        print(f"Using ASE coordinate normalization factor: {args.ase_coord_norm_factor}")
+        args.normalize_factors = [args.ase_coord_norm_factor, 4, 1]
+        print(f"Updated normalize_factors to: {args.normalize_factors}")
+    else:
+        # Fallback: Use improved default normalization for ASE databases
+        print("Warning: ASE coordinate normalization not computed, using improved default")
+        args.normalize_factors = [3.0, 4, 1]  # Better default for molecular systems
+        print(f"Using improved default normalize_factors: {args.normalize_factors}")
 
 data_dummy = next(iter(dataloaders['train']))
 

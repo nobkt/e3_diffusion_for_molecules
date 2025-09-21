@@ -190,7 +190,59 @@ def analyze_and_save(epoch, model_sample, nodes_dist, args, device, dataset_info
 
     molecules = {key: torch.cat(molecules[key], dim=0) for key in molecules}
     validity_dict, rdkit_tuple = analyze_stability_for_molecules(molecules, dataset_info)
-
+    
+    # Enhanced analysis and warnings
+    mol_stable_ratio = validity_dict.get('mol_stable', 0.0)
+    atm_stable_ratio = validity_dict.get('atm_stable', 0.0)
+    
+    print(f"=== Epoch {epoch} Stability Analysis ===")
+    print(f"Molecular stability: {mol_stable_ratio:.3f} ({mol_stable_ratio*100:.1f}%)")
+    print(f"Atomic stability: {atm_stable_ratio:.3f} ({atm_stable_ratio*100:.1f}%)")
+    
+    # Compute distance statistics for sampled molecules
+    if len(molecules['x']) > 0:
+        distances = []
+        for mol_idx in range(min(10, len(molecules['x']))):  # Analyze first 10 molecules
+            x_mol = molecules['x'][mol_idx]
+            mask_mol = molecules['node_mask'][mol_idx].squeeze()
+            n_atoms = int(mask_mol.sum())
+            
+            if n_atoms > 1:
+                positions = x_mol[:n_atoms]
+                # Compute all pairwise distances
+                for i in range(n_atoms):
+                    for j in range(i+1, n_atoms):
+                        dist = torch.norm(positions[i] - positions[j]).item()
+                        distances.append(dist)
+        
+        if distances:
+            distances = torch.tensor(distances)
+            print(f"Distance statistics (first 10 molecules):")
+            print(f"  Mean distance: {distances.mean():.3f}")
+            print(f"  Min distance: {distances.min():.3f}")
+            print(f"  Max distance: {distances.max():.3f}")
+            print(f"  Std distance: {distances.std():.3f}")
+            
+            # Check for problematic distances
+            very_short = (distances < 0.8).sum().item()
+            very_long = (distances > 5.0).sum().item()
+            
+            if very_short > 0:
+                print(f"WARNING: {very_short} very short distances (<0.8 Å) detected!")
+            if very_long > 0:
+                print(f"WARNING: {very_long} very long distances (>5.0 Å) detected!")
+    
+    # Warnings based on stability ratios
+    if mol_stable_ratio < 0.1:
+        print("🚨 CRITICAL: Very low molecular stability (<10%). Consider:")
+        print("   - Checking coordinate normalization factors")
+        print("   - Reducing learning rate")
+        print("   - Adjusting diffusion noise schedule")
+    elif mol_stable_ratio < 0.3:
+        print("⚠️  WARNING: Low molecular stability (<30%). Monitor closely.")
+    elif mol_stable_ratio > 0.7:
+        print("✅ Good molecular stability (>70%).")
+    
     wandb.log(validity_dict)
     if rdkit_tuple is not None:
         wandb.log({'Validity': rdkit_tuple[0][0], 'Uniqueness': rdkit_tuple[0][1], 'Novelty': rdkit_tuple[0][2]})

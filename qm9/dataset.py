@@ -136,6 +136,11 @@ def compute_ase_coordinate_normalization(dataset_data):
     """
     Compute appropriate coordinate normalization factors for ASE data.
     
+    This function computes a normalization factor that scales molecular coordinates
+    to an appropriate range for diffusion model training. It uses the typical 
+    molecular size scale rather than just standard deviation to ensure better
+    training dynamics.
+    
     Parameters
     ----------
     dataset_data : dict
@@ -144,7 +149,7 @@ def compute_ase_coordinate_normalization(dataset_data):
     Returns
     -------
     float
-        Coordinate normalization factor (standard deviation of coordinates)
+        Coordinate normalization factor (molecular size scale)
     """
     positions = dataset_data['positions']  # Shape: [n_molecules, max_atoms, 3]
     atom_mask = torch.ones_like(positions[:, :, 0])  # Default mask if not available
@@ -160,21 +165,44 @@ def compute_ase_coordinate_normalization(dataset_data):
     valid_coords = positions[atom_mask.unsqueeze(-1).expand_as(positions) == 1]
     
     if len(valid_coords) == 0:
-        print("Warning: No valid coordinates found, using default normalization factor 1.0")
-        return 1.0
+        print("Warning: No valid coordinates found, using default normalization factor 3.0")
+        return 3.0
     
-    # Compute standard deviation of all coordinates
+    # Compute molecular size statistics
     coord_std = torch.std(valid_coords).item()
+    coord_max = torch.max(torch.abs(valid_coords)).item()
+    coord_mean_abs = torch.mean(torch.abs(valid_coords)).item()
     
-    # Ensure we don't get too small values that could cause numerical issues
-    coord_std = max(coord_std, 0.1)
+    # Use a scale factor based on typical molecular dimensions
+    # This approach is more robust than just standard deviation
+    # Target: scale coordinates to ~1-2 range for optimal diffusion dynamics
     
-    print(f"Computed coordinate normalization factor: {coord_std:.4f}")
-    print(f"Coordinate statistics: mean={torch.mean(torch.abs(valid_coords)):.4f}, "
-          f"std={torch.std(valid_coords):.4f}, "
-          f"max={torch.max(torch.abs(valid_coords)):.4f}")
+    # Method 1: Use 90th percentile of absolute coordinates (robust to outliers)
+    coord_90th = torch.quantile(torch.abs(valid_coords), 0.9).item()
     
-    return coord_std
+    # Method 2: Use mean absolute deviation + margin for molecular size
+    coord_mad = torch.mean(torch.abs(valid_coords - torch.mean(valid_coords))).item()
+    
+    # Choose normalization factor: use the larger of 90th percentile or 2*MAD
+    # This ensures we capture the typical molecular size while being robust to outliers
+    norm_factor = max(coord_90th, 2 * coord_mad)
+    
+    # Ensure reasonable bounds: molecular coordinates should be in 1-10 Angstrom range
+    # So normalization factor should be 1.5-8.0 for good diffusion dynamics
+    norm_factor = max(norm_factor, 1.5)  # Minimum normalization for small molecules
+    norm_factor = min(norm_factor, 8.0)  # Maximum normalization for large molecules
+    
+    print(f"=== ASE Coordinate Normalization Analysis ===")
+    print(f"Coordinate statistics:")
+    print(f"  Mean absolute value: {coord_mean_abs:.4f}")
+    print(f"  Standard deviation: {coord_std:.4f}")
+    print(f"  90th percentile: {coord_90th:.4f}")
+    print(f"  Mean absolute deviation: {coord_mad:.4f}")
+    print(f"  Maximum absolute value: {coord_max:.4f}")
+    print(f"Computed coordinate normalization factor: {norm_factor:.4f}")
+    print(f"This will scale coordinates to ~{coord_90th/norm_factor:.2f} typical range")
+    
+    return norm_factor
 
 
 def update_ase_dataset_config(atoms_list, remove_h=False):
