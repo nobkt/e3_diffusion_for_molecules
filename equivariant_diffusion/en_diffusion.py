@@ -49,6 +49,10 @@ def polynomial_schedule(timesteps: int, s=1e-4, power=3.):
 
     alphas2 = precision * alphas2 + s
 
+    # Ensure alphas2 is in valid range to prevent negative sigma^2 values
+    # which would cause NaN in log(sigma^2) computations
+    alphas2 = np.clip(alphas2, a_min=s, a_max=1.0)
+
     return alphas2
 
 
@@ -188,6 +192,10 @@ class PredefinedNoiseSchedule(torch.nn.Module):
         print('alphas2', alphas2)
 
         sigmas2 = 1 - alphas2
+
+        # Ensure sigmas2 values are positive to prevent NaN in log computations
+        # This is a safety check for edge cases where alphas2 might be >= 1
+        sigmas2 = np.clip(sigmas2, a_min=1e-8, a_max=1.0)
 
         log_alphas2 = np.log(alphas2)
         log_sigmas2 = np.log(sigmas2)

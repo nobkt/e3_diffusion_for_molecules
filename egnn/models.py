@@ -98,7 +98,12 @@ class EGNN_dynamics_QM9(nn.Module):
         vel = vel.view(bs, n_nodes, -1)
 
         if torch.any(torch.isnan(vel)):
-            print('Warning: detected nan, resetting EGNN output to zero.')
+            print('Warning: detected nan in EGNN velocity output, resetting to zero.')
+            print(f'  Velocity stats - min: {vel[torch.isfinite(vel)].min().item():.6f}, '
+                  f'max: {vel[torch.isfinite(vel)].max().item():.6f}')
+            print(f'  Input stats - h_final range: [{h_final.min().item():.6f}, {h_final.max().item():.6f}]')
+            print('  This indicates numerical instability in the diffusion process.')
+            print('  Consider: 1) Checking noise schedule parameters, 2) Reducing learning rate, 3) Gradient clipping')
             vel = torch.zeros_like(vel)
 
         if node_mask is None:
