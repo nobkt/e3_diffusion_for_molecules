@@ -10,6 +10,7 @@ import qm9.utils as qm9utils
 from qm9 import losses
 import time
 import torch
+from training_optimizer import TrainingOptimizer
 
 
 def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device, dtype, property_norms, optim,
@@ -92,6 +93,7 @@ def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device, dt
         if args.break_train_epoch:
             break
     wandb.log({"Train Epoch NLL": np.mean(nll_epoch)}, commit=False)
+    return np.mean(nll_epoch)  # Return average loss for optimization
 
 
 def check_mask_correct(variables, node_mask):
@@ -174,7 +176,7 @@ def sample_different_sizes_and_save(model, nodes_dist, args, device, dataset_inf
 
 
 def analyze_and_save(epoch, model_sample, nodes_dist, args, device, dataset_info, prop_dist,
-                     n_samples=1000, batch_size=100):
+                     n_samples=1000, batch_size=100, training_optimizer=None, optim=None, loss=None):
     print(f'Analyzing molecule stability at epoch {epoch}...')
     batch_size = min(batch_size, n_samples)
     assert n_samples % batch_size == 0
@@ -200,6 +202,7 @@ def analyze_and_save(epoch, model_sample, nodes_dist, args, device, dataset_info
     print(f"Atomic stability: {atm_stable_ratio:.3f} ({atm_stable_ratio*100:.1f}%)")
     
     # Compute distance statistics for sampled molecules
+    distance_stats = {}
     if len(molecules['x']) > 0:
         distances = []
         for mol_idx in range(min(10, len(molecules['x']))):  # Analyze first 10 molecules
@@ -217,15 +220,24 @@ def analyze_and_save(epoch, model_sample, nodes_dist, args, device, dataset_info
         
         if distances:
             distances = torch.tensor(distances)
+            distance_stats = {
+                'mean': distances.mean().item(),
+                'min': distances.min().item(),
+                'max': distances.max().item(),
+                'std': distances.std().item(),
+                'very_short_count': (distances < 0.8).sum().item(),
+                'very_long_count': (distances > 5.0).sum().item()
+            }
+            
             print(f"Distance statistics (first 10 molecules):")
-            print(f"  Mean distance: {distances.mean():.3f}")
-            print(f"  Min distance: {distances.min():.3f}")
-            print(f"  Max distance: {distances.max():.3f}")
-            print(f"  Std distance: {distances.std():.3f}")
+            print(f"  Mean distance: {distance_stats['mean']:.3f}")
+            print(f"  Min distance: {distance_stats['min']:.3f}")
+            print(f"  Max distance: {distance_stats['max']:.3f}")
+            print(f"  Std distance: {distance_stats['std']:.3f}")
             
             # Check for problematic distances
-            very_short = (distances < 0.8).sum().item()
-            very_long = (distances > 5.0).sum().item()
+            very_short = distance_stats['very_short_count']
+            very_long = distance_stats['very_long_count']
             
             if very_short > 0:
                 print(f"WARNING: {very_short} very short distances (<0.8 Å) detected!")
@@ -240,18 +252,98 @@ def analyze_and_save(epoch, model_sample, nodes_dist, args, device, dataset_info
                 print("   - Try values between 1.5-5.0 for typical molecular systems")
                 print("   - For ASE databases, ensure your --normalize_factors isn't being overridden")
     
-    # Warnings based on stability ratios
-    if mol_stable_ratio < 0.1:
-        print("🚨 CRITICAL: Very low molecular stability (<10%). Consider:")
-        print("   - Checking coordinate normalization factors")
-        print("   - For ASE databases: Ensure your --normalize_factors argument is respected")
-        print("   - Reducing learning rate")
-        print("   - Adjusting diffusion noise schedule")
-        print("   - Check if coordinate range in your data matches the normalization factor")
-    elif mol_stable_ratio < 0.3:
-        print("⚠️  WARNING: Low molecular stability (<30%). Monitor closely.")
-    elif mol_stable_ratio > 0.7:
-        print("✅ Good molecular stability (>70%).")
+    # Automatic optimization if enabled
+    optimization_applied = False
+    if training_optimizer is not None and loss is not None:
+        print("\n🤖 AUTOMATIC OPTIMIZATION ANALYSIS:")
+        
+        # Analyze current training state
+        analysis = training_optimizer.analyze_training_state(
+            loss=loss,
+            mol_stability=mol_stable_ratio,
+            atm_stability=atm_stable_ratio,
+            distance_stats=distance_stats,
+            epoch=epoch
+        )
+        
+        # Generate optimization plan
+        optimization_plan = training_optimizer.generate_optimization_plan(
+            current_lr=optim.param_groups[0]['lr'] if optim else args.lr,
+            current_norm_factors=args.normalize_factors if hasattr(args, 'normalize_factors') else [1, 4, 1],
+            analysis=analysis,
+            loss=loss,
+            stability=mol_stable_ratio,
+            distance_stats=distance_stats
+        )
+        
+        # Report analysis results
+        if analysis['problems']:
+            print(f"   Problems detected: {', '.join(analysis['problems'])}")
+            print(f"   Critical issues: {'Yes' if analysis['critical'] else 'No'}")
+        
+        # Apply optimizations if recommended
+        if optimization_plan['apply_fixes']:
+            print("\n🔧 APPLYING AUTOMATIC OPTIMIZATIONS:")
+            optimization_applied = True
+            
+            # Apply learning rate adjustment
+            if abs(optimization_plan['new_lr'] - optim.param_groups[0]['lr']) > 1e-7:
+                old_lr = optim.param_groups[0]['lr']
+                for param_group in optim.param_groups:
+                    param_group['lr'] = optimization_plan['new_lr']
+                print(f"   ✓ Learning rate: {old_lr:.2e} → {optimization_plan['new_lr']:.2e}")
+            
+            # Apply normalization factor adjustment
+            old_norm = args.normalize_factors[0]
+            if abs(optimization_plan['new_norm_factors'][0] - old_norm) > 0.1:
+                args.normalize_factors = optimization_plan['new_norm_factors']
+                print(f"   ✓ Coordinate normalization: {old_norm:.3f} → {args.normalize_factors[0]:.3f}")
+                print(f"   ⚠️  Note: Normalization changes will take effect in next epoch")
+            
+            # Report rationale
+            print("   Rationale:")
+            for reason in optimization_plan['rationale']:
+                print(f"     • {reason}")
+            
+            # Report expected improvements
+            if optimization_plan['expected_improvements']:
+                print("   Expected improvements:")
+                for improvement in optimization_plan['expected_improvements']:
+                    print(f"     • {improvement}")
+            
+            # Check if restart is recommended
+            if training_optimizer.should_restart_training(analysis, epoch):
+                print("\n🔄 RESTART RECOMMENDATION:")
+                print("   Training restart is recommended due to multiple critical issues.")
+                print("   Consider stopping training and restarting with the optimized parameters.")
+        
+        # Check for diffusion schedule issues
+        schedule_analysis = training_optimizer.analyze_diffusion_schedule_issues(loss, mol_stable_ratio, epoch)
+        if schedule_analysis:
+            print("\n📋 DIFFUSION SCHEDULE ANALYSIS:")
+            for param, details in schedule_analysis.items():
+                print(f"   {param.upper()} ISSUE: {details['issue']}")
+                print(f"     Current problem: {details['current_issue']}")
+                print(f"     Suggestion: {details['suggestion']}")
+                print(f"     Rationale: {details['rationale']}")
+                print(f"     ⚠️  Manual adjustment required - restart training with suggested parameters")
+        
+        if not optimization_plan['apply_fixes'] and not schedule_analysis:
+            print("   No critical issues detected - continuing with current parameters.")
+    
+    # Original warnings based on stability ratios
+    if not optimization_applied:  # Only show original warnings if no optimization was applied
+        if mol_stable_ratio < 0.1:
+            print("🚨 CRITICAL: Very low molecular stability (<10%). Consider:")
+            print("   - Checking coordinate normalization factors")
+            print("   - For ASE databases: Ensure your --normalize_factors argument is respected")
+            print("   - Reducing learning rate")
+            print("   - Adjusting diffusion noise schedule")
+            print("   - Check if coordinate range in your data matches the normalization factor")
+        elif mol_stable_ratio < 0.3:
+            print("⚠️  WARNING: Low molecular stability (<30%). Monitor closely.")
+        elif mol_stable_ratio > 0.7:
+            print("✅ Good molecular stability (>70%).")
     
     wandb.log(validity_dict)
     if rdkit_tuple is not None:

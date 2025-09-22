@@ -19,6 +19,7 @@ import time
 import pickle
 from qm9.utils import prepare_context, compute_mean_mad
 from train_test import train_epoch, test, analyze_and_save
+from training_optimizer import TrainingOptimizer
 
 parser = argparse.ArgumentParser(description='E3Diffusion')
 parser.add_argument('--exp_name', type=str, default='debug_10')
@@ -252,6 +253,15 @@ optim = get_optim(args, model)
 gradnorm_queue = utils.Queue()
 gradnorm_queue.add(3000)  # Add large value that will be flushed.
 
+# Initialize automatic training optimizer
+training_optimizer = TrainingOptimizer(
+    initial_lr=args.lr,
+    initial_norm_factors=args.normalize_factors if hasattr(args, 'normalize_factors') else [1, 4, 1]
+)
+print(f"🤖 Automatic training optimization enabled")
+print(f"   Initial learning rate: {args.lr:.2e}")
+print(f"   Initial normalization factors: {args.normalize_factors if hasattr(args, 'normalize_factors') else [1, 4, 1]}")
+
 
 def check_mask_correct(variables, node_mask):
     for variable in variables:
@@ -292,7 +302,7 @@ def main():
     best_nll_test = 1e8
     for epoch in range(args.start_epoch, args.n_epochs):
         start_epoch = time.time()
-        train_epoch(args=args, loader=dataloaders['train'], epoch=epoch, model=model, model_dp=model_dp,
+        avg_loss = train_epoch(args=args, loader=dataloaders['train'], epoch=epoch, model=model, model_dp=model_dp,
                     model_ema=model_ema, ema=ema, device=device, dtype=dtype, property_norms=property_norms,
                     nodes_dist=nodes_dist, dataset_info=dataset_info,
                     gradnorm_queue=gradnorm_queue, optim=optim, prop_dist=prop_dist)
@@ -305,7 +315,8 @@ def main():
             if not args.break_train_epoch:
                 analyze_and_save(args=args, epoch=epoch, model_sample=model_ema, nodes_dist=nodes_dist,
                                  dataset_info=dataset_info, device=device,
-                                 prop_dist=prop_dist, n_samples=args.n_stability_samples)
+                                 prop_dist=prop_dist, n_samples=args.n_stability_samples,
+                                 training_optimizer=training_optimizer, optim=optim, loss=avg_loss)
             nll_val = test(args=args, loader=dataloaders['valid'], epoch=epoch, eval_model=model_ema_dp,
                            partition='Val', device=device, dtype=dtype, nodes_dist=nodes_dist,
                            property_norms=property_norms)
