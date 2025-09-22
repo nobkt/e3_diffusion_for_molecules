@@ -194,18 +194,37 @@ wandb.save('*.txt')
 # Retrieve QM9 dataloaders
 dataloaders, charge_scale = dataset.retrieve_dataloaders(args)
 
-# Update normalization factors for ASE databases
+# Update normalization factors for ASE databases only if user didn't explicitly set them
 if 'ase_db' in args.dataset:
-    if hasattr(args, 'ase_coord_norm_factor'):
-        # Use computed coordinate normalization factor for ASE data
-        print(f"Using ASE coordinate normalization factor: {args.ase_coord_norm_factor}")
-        args.normalize_factors = [args.ase_coord_norm_factor, 4, 1]
-        print(f"Updated normalize_factors to: {args.normalize_factors}")
+    # Check if user explicitly provided normalize_factors (different from default)
+    user_provided_factors = args.normalize_factors != [1, 4, 1]
+    
+    if user_provided_factors:
+        # User explicitly set normalize_factors, respect their choice
+        print(f"Using user-specified normalize_factors: {args.normalize_factors}")
+        print(f"Note: For ASE databases, coordinate normalization factor was computed but overridden by user")
+        if hasattr(args, 'ase_coord_norm_factor'):
+            print(f"  (Computed ASE coordinate normalization factor was: {args.ase_coord_norm_factor})")
     else:
-        # Fallback: Use improved default normalization for ASE databases
-        print("Warning: ASE coordinate normalization not computed, using improved default")
-        args.normalize_factors = [3.0, 4, 1]  # Better default for molecular systems
-        print(f"Using improved default normalize_factors: {args.normalize_factors}")
+        # User didn't specify, use computed or default values
+        if hasattr(args, 'ase_coord_norm_factor'):
+            # Use computed coordinate normalization factor for ASE data
+            print(f"Using computed ASE coordinate normalization factor: {args.ase_coord_norm_factor}")
+            args.normalize_factors = [args.ase_coord_norm_factor, 4, 1]
+            print(f"Updated normalize_factors to: {args.normalize_factors}")
+        else:
+            # Fallback: Use improved default normalization for ASE databases
+            print("Warning: ASE coordinate normalization not computed, using improved default")
+            args.normalize_factors = [3.0, 4, 1]  # Better default for molecular systems
+            print(f"Using improved default normalize_factors: {args.normalize_factors}")
+
+# Validate normalization factors for molecular systems
+coord_norm_factor = args.normalize_factors[0]
+if coord_norm_factor < 0.5 or coord_norm_factor > 10.0:
+    print(f"⚠️  WARNING: Coordinate normalization factor {coord_norm_factor} may be inappropriate for molecular systems.")
+    print(f"   Recommended range: 0.5 - 10.0 (typical: 1.5 - 5.0)")
+    print(f"   Very low values (<0.5) may cause numerical instabilities.")
+    print(f"   Very high values (>10.0) may lead to poor diffusion dynamics.")
 
 data_dummy = next(iter(dataloaders['train']))
 
