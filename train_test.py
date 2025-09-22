@@ -231,13 +231,23 @@ def analyze_and_save(epoch, model_sample, nodes_dist, args, device, dataset_info
                 print(f"WARNING: {very_short} very short distances (<0.8 Å) detected!")
             if very_long > 0:
                 print(f"WARNING: {very_long} very long distances (>5.0 Å) detected!")
+            
+            # Additional troubleshooting for distance issues
+            if very_short > 50 or very_long > 1000:
+                print("\n🔍 TROUBLESHOOTING: Extreme distance issues detected.")
+                print("   This often indicates normalization problems:")
+                print(f"   - Current coordinate normalization factor: {args.normalize_factors[0] if hasattr(args, 'normalize_factors') else 'unknown'}")
+                print("   - Try values between 1.5-5.0 for typical molecular systems")
+                print("   - For ASE databases, ensure your --normalize_factors isn't being overridden")
     
     # Warnings based on stability ratios
     if mol_stable_ratio < 0.1:
         print("🚨 CRITICAL: Very low molecular stability (<10%). Consider:")
         print("   - Checking coordinate normalization factors")
+        print("   - For ASE databases: Ensure your --normalize_factors argument is respected")
         print("   - Reducing learning rate")
         print("   - Adjusting diffusion noise schedule")
+        print("   - Check if coordinate range in your data matches the normalization factor")
     elif mol_stable_ratio < 0.3:
         print("⚠️  WARNING: Low molecular stability (<30%). Monitor closely.")
     elif mol_stable_ratio > 0.7:
