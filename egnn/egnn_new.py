@@ -263,8 +263,11 @@ def unsorted_segment_sum(data, segment_ids, num_segments, normalization_factor, 
     result = data.new_full(result_shape, 0)  # Init empty result tensor.
     segment_ids = segment_ids.unsqueeze(-1).expand(-1, data.size(1))
     result.scatter_add_(0, segment_ids, data)
+    
     if aggregation_method == 'sum':
-        result = result / normalization_factor
+        # Prevent division by zero or very small numbers that could cause numerical instability
+        safe_normalization_factor = max(abs(normalization_factor), 1e-8)
+        result = result / safe_normalization_factor
 
     if aggregation_method == 'mean':
         norm = data.new_zeros(result.shape)

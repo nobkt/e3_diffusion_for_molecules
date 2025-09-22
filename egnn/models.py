@@ -76,7 +76,33 @@ class EGNN_dynamics_QM9(nn.Module):
             h = torch.cat([h, context], dim=1)
 
         if self.mode == 'egnn_dynamics':
+            # Check for numerical issues in inputs before EGNN forward pass
+            # Clamp extreme values to prevent numerical instability
+            if torch.any(torch.abs(h) > 1e6) or torch.any(torch.abs(x) > 1e6):
+                print('Warning: Extreme values detected in EGNN inputs, clamping to safe range.')
+                h = torch.clamp(h, -1e6, 1e6)
+                x = torch.clamp(x, -1e6, 1e6)
+            
+            # Check for NaN values
+            if torch.any(torch.isnan(h)) or torch.any(torch.isnan(x)):
+                print('Warning: NaN detected in EGNN inputs, replacing with zeros.')
+                h = torch.nan_to_num(h, nan=0.0, posinf=1e6, neginf=-1e6)
+                x = torch.nan_to_num(x, nan=0.0, posinf=1e6, neginf=-1e6)
+            
             h_final, x_final = self.egnn(h, x, edges, node_mask=node_mask, edge_mask=edge_mask)
+            
+            # Check for numerical issues in EGNN outputs
+            if torch.any(torch.isnan(h_final)) or torch.any(torch.isnan(x_final)):
+                print('Warning: NaN detected in EGNN outputs, replacing with zeros.')
+                h_final = torch.nan_to_num(h_final, nan=0.0, posinf=1e6, neginf=-1e6)
+                x_final = torch.nan_to_num(x_final, nan=0.0, posinf=1e6, neginf=-1e6)
+            
+            # Clamp extreme values in outputs
+            if torch.any(torch.abs(h_final) > 1e6) or torch.any(torch.abs(x_final) > 1e6):
+                print('Warning: Extreme values detected in EGNN outputs, clamping to safe range.')
+                h_final = torch.clamp(h_final, -1e6, 1e6)
+                x_final = torch.clamp(x_final, -1e6, 1e6)
+            
             vel = (x_final - x) * node_mask  # This masking operation is redundant but just in case
         elif self.mode == 'gnn_dynamics':
             xh = torch.cat([x, h], dim=1)

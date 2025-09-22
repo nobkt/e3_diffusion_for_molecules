@@ -39,6 +39,10 @@ def polynomial_schedule(timesteps: int, s=1e-4, power=3.):
     """
     A noise schedule based on a simple polynomial equation: 1 - x^power.
     """
+    # Clamp precision parameter to prevent extreme values that cause numerical instability
+    # Very small s values (< 1e-4) can lead to extreme log_SNR values and NaN propagation
+    s = max(s, 1e-4)
+    
     steps = timesteps + 1
     x = np.linspace(0, steps, steps)
     alphas2 = (1 - np.power(x / steps, power))**2
@@ -51,7 +55,7 @@ def polynomial_schedule(timesteps: int, s=1e-4, power=3.):
 
     # Ensure alphas2 is in valid range to prevent negative sigma^2 values
     # which would cause NaN in log(sigma^2) computations
-    alphas2 = np.clip(alphas2, a_min=s, a_max=1.0)
+    alphas2 = np.clip(alphas2, a_min=s, a_max=1.0 - s)
 
     return alphas2
 
@@ -201,8 +205,18 @@ class PredefinedNoiseSchedule(torch.nn.Module):
         log_sigmas2 = np.log(sigmas2)
 
         log_alphas2_to_sigmas2 = log_alphas2 - log_sigmas2
+        
+        # Clamp gamma values to prevent extreme log_SNR that cause numerical instability
+        # Extreme values (>10 or <-10) can lead to NaN propagation in EGNN layers
+        log_alphas2_to_sigmas2 = np.clip(log_alphas2_to_sigmas2, -10.0, 10.0)
 
         print('gamma', -log_alphas2_to_sigmas2)
+        
+        # Check for potential numerical issues
+        gamma_values = -log_alphas2_to_sigmas2
+        if np.any(np.abs(gamma_values) > 8.0):
+            print(f"Warning: Large gamma values detected (range: [{gamma_values.min():.3f}, {gamma_values.max():.3f}])")
+            print("This may cause numerical instability. Consider using larger diffusion_noise_precision (e.g., 1e-4 instead of 1e-5)")
 
         self.gamma = torch.nn.Parameter(
             torch.from_numpy(-log_alphas2_to_sigmas2).float(),

@@ -55,6 +55,13 @@ def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device, dt
                                                                 x, h, node_mask, edge_mask, context)
         # standard nll from forward KL
         loss = nll + args.ode_regularization * reg_term
+        
+        # Check for numerical instability in loss values
+        if torch.isnan(loss) or torch.isinf(loss) or loss.item() > 1e6:
+            print(f'Warning: Detected extreme loss value: {loss.item():.2f}, skipping batch to prevent instability')
+            optim.zero_grad()  # Clear gradients
+            continue  # Skip this batch
+        
         loss.backward()
 
         if args.clip_grad:
