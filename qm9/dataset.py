@@ -118,14 +118,25 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
         datasets[split_name] = split_data
     
     # Get species information
-    if include_charges:
+    if include_charges and 'charges' in dataset_data and dataset_data['charges'].numel() > 0:
         all_species = torch.unique(dataset_data['charges'], sorted=True)
         if all_species[0] == 0:
             all_species = all_species[1:]
     else:
-        # When charges are not included, we don't need species information
-        # Set to empty tensor to avoid one_hot tensor creation issues
-        all_species = torch.tensor([], dtype=torch.long)
+        # Use atomic_numbers for species information (always available for ASE databases)
+        if 'atomic_numbers' in dataset_data and dataset_data['atomic_numbers'].numel() > 0:
+            all_species = torch.unique(dataset_data['atomic_numbers'], sorted=True)
+            if all_species[0] == 0:
+                all_species = all_species[1:]
+        else:
+            # Fallback: determine species from the actual atoms in the database
+            all_atomic_numbers = set()
+            for atoms in all_atoms:
+                atomic_numbers = atoms.numbers
+                if remove_h:
+                    atomic_numbers = atomic_numbers[atomic_numbers != 1]
+                all_atomic_numbers.update(atomic_numbers)
+            all_species = torch.tensor(sorted(list(all_atomic_numbers)), dtype=torch.long)
     
     # Create ProcessedDataset objects
     processed_datasets = {}
@@ -285,6 +296,9 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=F
     positions = torch.zeros(n_molecules, max_atoms, 3, dtype=torch.float32)
     num_atoms = torch.zeros(n_molecules, dtype=torch.long)
     
+    # Always create atomic_numbers for one_hot encoding (these are element types, not charges)
+    atomic_numbers = torch.zeros(n_molecules, max_atoms, dtype=torch.long)
+    
     # Initialize charges only if include_charges is True
     if include_charges:
         charges = torch.zeros(n_molecules, max_atoms, dtype=torch.long)
@@ -331,15 +345,15 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=F
 
     for i, (atoms, props) in enumerate(zip(atoms_list, properties_list)):
         pos = torch.tensor(atoms.positions, dtype=torch.float32)
-        atomic_numbers = torch.tensor(atoms.numbers, dtype=torch.long)
+        atomic_nums = torch.tensor(atoms.numbers, dtype=torch.long)
         
         if remove_h:
             # Remove hydrogen atoms (atomic number 1)
-            mask = atomic_numbers != 1
+            mask = atomic_nums != 1
             pos = pos[mask]
-            atomic_numbers = atomic_numbers[mask]
+            atomic_nums = atomic_nums[mask]
         
-        n_atoms = len(atomic_numbers)
+        n_atoms = len(atomic_nums)
         num_atoms[i] = n_atoms
         
         if n_atoms > 0:
@@ -348,9 +362,12 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=F
             
             positions[i, :n_atoms] = pos
             
+            # Always store atomic numbers for one_hot encoding
+            atomic_numbers[i, :n_atoms] = atomic_nums
+            
             # Only assign charges if include_charges is True
             if include_charges:
-                charges[i, :n_atoms] = atomic_numbers
+                charges[i, :n_atoms] = atomic_nums
         
         # Store existing properties
         for prop_name, tensor in property_tensors.items():
@@ -431,6 +448,7 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=F
     dataset_data = {
         'positions': positions,
         'charges': charges,
+        'atomic_numbers': atomic_numbers,  # Always include for one_hot encoding
         'num_atoms': num_atoms,
         'atom_types_encoding': atom_types_encoding,
         'functional_groups_encoding': functional_groups_encoding

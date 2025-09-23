@@ -71,7 +71,12 @@ class ProcessedDataset(Dataset):
 
         # Handle empty datasets gracefully
         if len(included_species) > 0:
-            self.data['one_hot'] = self.data['charges'].unsqueeze(-1) == included_species.unsqueeze(0).unsqueeze(0)
+            # Use atomic_numbers for one_hot encoding if available, otherwise use charges
+            if 'atomic_numbers' in self.data:
+                source_tensor = self.data['atomic_numbers']
+            else:
+                source_tensor = self.data['charges']
+            self.data['one_hot'] = source_tensor.unsqueeze(-1) == included_species.unsqueeze(0).unsqueeze(0)
             self.max_charge = max(included_species)
         else:
             # For empty datasets, create an empty one_hot tensor with correct shape
