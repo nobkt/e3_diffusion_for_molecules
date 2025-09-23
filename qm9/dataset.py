@@ -8,9 +8,12 @@ import torch
 import numpy as np
 
 
-def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_charges=True, remove_h=False):
+def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_charges=False, remove_h=False):
     """
     Load dataset from ASE database format.
+    
+    Note: For ASE databases, atomic charges (nuclear charges/atomic numbers) are not 
+    included in the database by default, so include_charges defaults to False.
     
     Parameters
     ----------
@@ -21,7 +24,9 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
     seed : int
         Random seed for reproducible splits
     include_charges : bool
-        Whether to include atomic charges in the dataset
+        Whether to include atomic charges (atomic numbers) in the dataset.
+        For ASE databases, this defaults to False since atomic charges are
+        not typically included in the database.
     remove_h : bool
         Whether to remove hydrogen atoms
         
@@ -94,11 +99,17 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
                 # Metadata keys - copy as-is to all splits
                 split_data[key] = values
             elif len(split_indices) > 0:
-                split_data[key] = values[split_indices]
+                # Handle empty tensors (like charges when include_charges=False)
+                if isinstance(values, torch.Tensor) and values.numel() == 0:
+                    split_data[key] = values  # Keep empty tensor as-is
+                else:
+                    split_data[key] = values[split_indices]
             else:
                 # Handle empty splits - create empty tensor with correct shape
                 if isinstance(values, torch.Tensor):
-                    if len(values.shape) == 1:
+                    if values.numel() == 0:
+                        split_data[key] = values  # Keep empty tensor as-is
+                    elif len(values.shape) == 1:
                         split_data[key] = torch.empty(0, dtype=values.dtype)
                     else:
                         split_data[key] = torch.empty(0, *values.shape[1:], dtype=values.dtype)
@@ -107,9 +118,19 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
         datasets[split_name] = split_data
     
     # Get species information
-    all_species = torch.unique(dataset_data['charges'], sorted=True)
-    if all_species[0] == 0:
-        all_species = all_species[1:]
+    if include_charges:
+        all_species = torch.unique(dataset_data['charges'], sorted=True)
+        if all_species[0] == 0:
+            all_species = all_species[1:]
+    else:
+        # When charges are not included, determine species from the all_atoms
+        all_atomic_numbers = set()
+        for atoms in all_atoms:
+            atomic_numbers = atoms.numbers
+            if remove_h:
+                atomic_numbers = atomic_numbers[atomic_numbers != 1]
+            all_atomic_numbers.update(atomic_numbers)
+        all_species = torch.tensor(sorted(list(all_atomic_numbers)), dtype=torch.long)
     
     # Create ProcessedDataset objects
     processed_datasets = {}
@@ -129,57 +150,91 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
 
 def update_ase_dataset_config(atoms_list, remove_h=False):
     """
-    Update the ASE dataset configuration based on actual data.
+    Update the ASE dataset configuration based on actual data analysis.
+    
+    This function comprehensively analyzes the entire ASE database to determine:
+    - All constituent elements without any heuristic processing
+    - Maximum number of atoms per molecule
+    - Distribution of molecule sizes (n_nodes)
+    - Atom type frequency distribution
     
     Parameters
     ----------
     atoms_list : list of ase.Atoms
-        List of ASE Atoms objects
+        List of ASE Atoms objects representing the entire database
     remove_h : bool
         Whether hydrogen atoms are removed
     """
     from configs.datasets_config import ase_db_with_h, ase_db_without_h
     
-    # Get all unique atomic numbers
+    # Comprehensive analysis of the entire database
     all_atomic_numbers = set()
     max_atoms = 0
     n_nodes_count = {}
+    atom_type_count = {}
     
-    for atoms in atoms_list:
+    print(f"Analyzing {len(atoms_list)} molecules from ASE database...")
+    
+    # Analyze each molecule in the database
+    for i, atoms in enumerate(atoms_list):
         atomic_numbers = atoms.numbers
         if remove_h:
             atomic_numbers = atomic_numbers[atomic_numbers != 1]
         
-        all_atomic_numbers.update(atomic_numbers)
-        n_atoms = len(atomic_numbers)
+        # Ensure atomic_numbers is iterable (handle single atom case)
+        if hasattr(atomic_numbers, '__iter__'):
+            atomic_numbers_list = atomic_numbers
+        else:
+            atomic_numbers_list = [atomic_numbers]
+        
+        # Track all unique atomic numbers (constituent elements)
+        all_atomic_numbers.update(atomic_numbers_list)
+        
+        # Track molecule size distribution
+        n_atoms = len(atomic_numbers_list)
         max_atoms = max(max_atoms, n_atoms)
         n_nodes_count[n_atoms] = n_nodes_count.get(n_atoms, 0) + 1
+        
+        # Track atom type frequency distribution
+        for atomic_num in atomic_numbers_list:
+            atom_type_count[atomic_num] = atom_type_count.get(atomic_num, 0) + 1
     
-    # Create atom mappings
+    # Sort atomic numbers for consistent ordering
     all_atomic_numbers = sorted(list(all_atomic_numbers))
     
-    # Common element symbols mapping
+    # Create comprehensive element mapping without heuristics
+    # Use standard atomic number to symbol mapping
     atomic_num_to_symbol = {
-        1: 'H', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 15: 'P', 16: 'S', 17: 'Cl', 35: 'Br', 53: 'I',
-        14: 'Si', 13: 'Al', 32: 'Ge', 33: 'As', 34: 'Se', 5: 'B', 4: 'Be', 3: 'Li', 11: 'Na', 12: 'Mg',
+        1: 'H', 2: 'He', 3: 'Li', 4: 'Be', 5: 'B', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 10: 'Ne',
+        11: 'Na', 12: 'Mg', 13: 'Al', 14: 'Si', 15: 'P', 16: 'S', 17: 'Cl', 18: 'Ar',
         19: 'K', 20: 'Ca', 21: 'Sc', 22: 'Ti', 23: 'V', 24: 'Cr', 25: 'Mn', 26: 'Fe', 27: 'Co', 28: 'Ni',
-        29: 'Cu', 30: 'Zn', 31: 'Ga', 50: 'Sn', 51: 'Sb', 52: 'Te', 82: 'Pb', 83: 'Bi'
+        29: 'Cu', 30: 'Zn', 31: 'Ga', 32: 'Ge', 33: 'As', 34: 'Se', 35: 'Br', 36: 'Kr',
+        37: 'Rb', 38: 'Sr', 39: 'Y', 40: 'Zr', 41: 'Nb', 42: 'Mo', 43: 'Tc', 44: 'Ru', 45: 'Rh', 46: 'Pd',
+        47: 'Ag', 48: 'Cd', 49: 'In', 50: 'Sn', 51: 'Sb', 52: 'Te', 53: 'I', 54: 'Xe',
+        55: 'Cs', 56: 'Ba', 57: 'La', 58: 'Ce', 59: 'Pr', 60: 'Nd', 61: 'Pm', 62: 'Sm', 63: 'Eu', 64: 'Gd',
+        65: 'Tb', 66: 'Dy', 67: 'Ho', 68: 'Er', 69: 'Tm', 70: 'Yb', 71: 'Lu',
+        72: 'Hf', 73: 'Ta', 74: 'W', 75: 'Re', 76: 'Os', 77: 'Ir', 78: 'Pt', 79: 'Au', 80: 'Hg', 81: 'Tl',
+        82: 'Pb', 83: 'Bi', 84: 'Po', 85: 'At', 86: 'Rn'
     }
     
+    # Build atom decoder and encoder based on actual data analysis
     atom_decoder = []
     atom_encoder = {}
+    atom_type_distribution = {}
     
     for i, atomic_num in enumerate(all_atomic_numbers):
         symbol = atomic_num_to_symbol.get(atomic_num, f'X{atomic_num}')
         atom_decoder.append(symbol)
         atom_encoder[symbol] = i
+        atom_type_distribution[i] = atom_type_count.get(atomic_num, 0)
     
-    # Update the appropriate configuration
+    # Update the appropriate configuration based on actual database analysis
     config = ase_db_without_h if remove_h else ase_db_with_h
     config['atom_encoder'] = atom_encoder
     config['atom_decoder'] = atom_decoder
     config['max_n_nodes'] = max_atoms
     config['n_nodes'] = n_nodes_count
+    config['atom_types'] = atom_type_distribution
     
     # Update colors and radius for visualization (extend if needed)
     n_types = len(atom_decoder)
@@ -194,12 +249,20 @@ def update_ase_dataset_config(atoms_list, remove_h=False):
         config['colors_dic'] = (default_colors[1:] * ((n_types // len(default_colors[1:])) + 1))[:n_types]
         config['radius_dic'] = (default_radius[1:] * ((n_types // len(default_radius[1:])) + 1))[:n_types]
     
-    print(f"Updated ASE dataset config: {len(atom_decoder)} atom types, max {max_atoms} atoms per molecule")
+    print(f"Database analysis complete:")
+    print(f"  - Found {len(atom_decoder)} unique element types: {atom_decoder}")
+    print(f"  - Maximum atoms per molecule: {max_atoms}")
+    print(f"  - Total molecules analyzed: {len(atoms_list)}")
+    print(f"  - Atom type distribution: {atom_type_distribution}")
+    print(f"Updated ASE dataset configuration without heuristic processing")
 
 
-def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=True, remove_h=False):
+def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=False, remove_h=False):
     """
     Convert list of ASE Atoms objects to the dataset format expected by ProcessedDataset.
+    
+    Note: For ASE databases, atomic charges (atomic numbers) are not included by default
+    since they are not typically stored in ASE databases.
     
     Parameters
     ----------
@@ -208,7 +271,8 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=T
     properties_list : list of dict
         List of property dictionaries for each molecule
     include_charges : bool
-        Whether to include atomic charges
+        Whether to include atomic charges (atomic numbers). Defaults to False
+        for ASE databases since atomic charges are not included in the database.
     remove_h : bool
         Whether to remove hydrogen atoms
         
@@ -224,24 +288,43 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=T
     
     # Initialize arrays
     positions = torch.zeros(n_molecules, max_atoms, 3, dtype=torch.float32)
-    charges = torch.zeros(n_molecules, max_atoms, dtype=torch.long)
     num_atoms = torch.zeros(n_molecules, dtype=torch.long)
     
-    # Property arrays - we'll collect available properties
+    # Initialize charges only if include_charges is True
+    if include_charges:
+        charges = torch.zeros(n_molecules, max_atoms, dtype=torch.long)
+    else:
+        # For ASE databases, atomic charges are not included in the database
+        charges = torch.zeros(0, dtype=torch.long)  # Empty tensor for compatibility
+    
+    # Property arrays - comprehensive collection of ALL available properties
     all_properties = set()
     for props in properties_list:
         all_properties.update(props.keys())
     
+    print(f"Found {len(all_properties)} unique properties in ASE database: {sorted(all_properties)}")
+    
     property_tensors = {}
     
-    # Common QM9-style properties to look for
-    qm9_properties = ['energy', 'homo', 'lumo', 'gap', 'mu', 'alpha', 'zpve', 'U0', 'U', 'H', 'G', 'Cv']
+    # Load ALL available numeric properties from the database
+    for prop_name in sorted(all_properties):
+        # Check if this property contains numeric data that can be converted to tensors
+        sample_values = []
+        for props in properties_list:
+            if prop_name in props:
+                try:
+                    val = float(props[prop_name])
+                    sample_values.append(val)
+                except (ValueError, TypeError):
+                    # Skip non-numeric properties
+                    break
+        
+        # If we found numeric values, create a tensor for this property
+        if len(sample_values) > 0:
+            property_tensors[prop_name] = torch.zeros(n_molecules, dtype=torch.float32)
+            print(f"  Loading property: {prop_name}")
     
-    for prop in qm9_properties:
-        if any(prop in props for props in properties_list):
-            property_tensors[prop] = torch.zeros(n_molecules, dtype=torch.float32)
-    
-    # Add new molecular descriptor properties
+    # Add molecular descriptor properties (computed from structure)
     property_tensors['molecular_weight'] = torch.zeros(n_molecules, dtype=torch.float32)
     property_tensors['pi_conjugation_ratio'] = torch.zeros(n_molecules, dtype=torch.float32)
     
@@ -269,7 +352,10 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=T
             pos = pos - pos.mean(dim=0)
             
             positions[i, :n_atoms] = pos
-            charges[i, :n_atoms] = atomic_numbers
+            
+            # Only assign charges if include_charges is True
+            if include_charges:
+                charges[i, :n_atoms] = atomic_numbers
         
         # Store existing properties
         for prop_name, tensor in property_tensors.items():
