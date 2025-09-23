@@ -99,11 +99,17 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
                 # Metadata keys - copy as-is to all splits
                 split_data[key] = values
             elif len(split_indices) > 0:
-                split_data[key] = values[split_indices]
+                # Handle empty tensors (like charges when include_charges=False)
+                if isinstance(values, torch.Tensor) and values.numel() == 0:
+                    split_data[key] = values  # Keep empty tensor as-is
+                else:
+                    split_data[key] = values[split_indices]
             else:
                 # Handle empty splits - create empty tensor with correct shape
                 if isinstance(values, torch.Tensor):
-                    if len(values.shape) == 1:
+                    if values.numel() == 0:
+                        split_data[key] = values  # Keep empty tensor as-is
+                    elif len(values.shape) == 1:
                         split_data[key] = torch.empty(0, dtype=values.dtype)
                     else:
                         split_data[key] = torch.empty(0, *values.shape[1:], dtype=values.dtype)
@@ -117,9 +123,9 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
         if all_species[0] == 0:
             all_species = all_species[1:]
     else:
-        # When charges are not included, determine species from the atoms_list
+        # When charges are not included, determine species from the all_atoms
         all_atomic_numbers = set()
-        for atoms in atoms_list:
+        for atoms in all_atoms:
             atomic_numbers = atoms.numbers
             if remove_h:
                 atomic_numbers = atomic_numbers[atomic_numbers != 1]
