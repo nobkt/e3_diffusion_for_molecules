@@ -263,12 +263,24 @@ def unsorted_segment_sum(data, segment_ids, num_segments, normalization_factor, 
     result = data.new_full(result_shape, 0)  # Init empty result tensor.
     segment_ids = segment_ids.unsqueeze(-1).expand(-1, data.size(1))
     result.scatter_add_(0, segment_ids, data)
+    
     if aggregation_method == 'sum':
-        result = result / normalization_factor
+        # Add numerical stability check
+        if normalization_factor > 0:
+            result = result / normalization_factor
+        else:
+            print("Warning: normalization_factor is zero or negative, skipping normalization")
 
     if aggregation_method == 'mean':
         norm = data.new_zeros(result.shape)
         norm.scatter_add_(0, segment_ids, data.new_ones(data.shape))
-        norm[norm == 0] = 1
+        norm[norm == 0] = 1  # Avoid division by zero
         result = result / norm
+    
+    # Check for NaN or inf values and replace with zeros
+    if torch.any(torch.isnan(result)) or torch.any(torch.isinf(result)):
+        print("Warning: NaN or inf detected in unsorted_segment_sum output, replacing with zeros")
+        result = torch.where(torch.isnan(result) | torch.isinf(result), 
+                            torch.zeros_like(result), result)
+    
     return result

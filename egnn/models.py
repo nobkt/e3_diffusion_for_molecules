@@ -97,9 +97,10 @@ class EGNN_dynamics_QM9(nn.Module):
 
         vel = vel.view(bs, n_nodes, -1)
 
-        if torch.any(torch.isnan(vel)):
-            print('Warning: detected nan, resetting EGNN output to zero.')
-            vel = torch.zeros_like(vel)
+        if torch.any(torch.isnan(vel)) or torch.any(torch.isinf(vel)):
+            print('Warning: detected nan or inf in EGNN output, resetting to zero.')
+            vel = torch.where(torch.isnan(vel) | torch.isinf(vel), 
+                             torch.zeros_like(vel), vel)
 
         if node_mask is None:
             vel = remove_mean(vel)

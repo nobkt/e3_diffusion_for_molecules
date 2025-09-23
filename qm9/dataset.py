@@ -8,7 +8,8 @@ import torch
 import numpy as np
 
 
-def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_charges=False, remove_h=False):
+def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_charges=False, remove_h=False, 
+                      remove_duplicates=True, duplicate_tolerance=1e-6):
     """
     Load dataset from ASE database format.
     
@@ -29,6 +30,10 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
         not typically included in the database.
     remove_h : bool
         Whether to remove hydrogen atoms
+    remove_duplicates : bool
+        Whether to remove duplicate molecules based on geometry comparison
+    duplicate_tolerance : float
+        Tolerance for considering two molecules as duplicates based on position differences
         
     Returns
     -------
@@ -68,6 +73,66 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
         raise ValueError(f"No molecules found in database {db_path}")
     
     print(f"Loaded {len(all_atoms)} molecules from ASE database")
+    
+    # Remove duplicates if requested
+    if remove_duplicates and len(all_atoms) > 1:
+        print("Detecting and removing duplicate molecules...")
+        unique_atoms = []
+        unique_properties = []
+        duplicate_count = 0
+        
+        for i, (atoms, properties) in enumerate(zip(all_atoms, all_properties)):
+            # Process atoms first (remove H if requested) for comparison
+            pos = torch.tensor(atoms.positions, dtype=torch.float32)
+            atomic_nums = torch.tensor(atoms.numbers, dtype=torch.long)
+            
+            if remove_h:
+                mask = atomic_nums != 1
+                pos = pos[mask]
+                atomic_nums = atomic_nums[mask]
+            
+            # Center the molecule for comparison
+            if len(pos) > 0:
+                pos = pos - pos.mean(dim=0)
+            
+            # Check if this molecule is a duplicate
+            is_duplicate = False
+            for unique_atoms_obj in unique_atoms:
+                # Process unique molecule for comparison
+                unique_pos = torch.tensor(unique_atoms_obj.positions, dtype=torch.float32)
+                unique_atomic_nums = torch.tensor(unique_atoms_obj.numbers, dtype=torch.long)
+                
+                if remove_h:
+                    unique_mask = unique_atomic_nums != 1
+                    unique_pos = unique_pos[unique_mask]
+                    unique_atomic_nums = unique_atomic_nums[unique_mask]
+                
+                # Center the unique molecule
+                if len(unique_pos) > 0:
+                    unique_pos = unique_pos - unique_pos.mean(dim=0)
+                
+                # Compare molecules
+                if (len(pos) == len(unique_pos) and 
+                    torch.allclose(atomic_nums, unique_atomic_nums) and
+                    len(pos) > 0 and
+                    torch.allclose(pos, unique_pos, atol=duplicate_tolerance)):
+                    is_duplicate = True
+                    duplicate_count += 1
+                    break
+            
+            if not is_duplicate:
+                unique_atoms.append(atoms)
+                unique_properties.append(properties)
+        
+        print(f"Removed {duplicate_count} duplicate molecules")
+        print(f"Keeping {len(unique_atoms)} unique molecules")
+        
+        if len(unique_atoms) < 10:
+            print(f"WARNING: Only {len(unique_atoms)} unique molecules found. This may cause training instability.")
+            print("Consider using a more diverse dataset or setting remove_duplicates=False.")
+        
+        all_atoms = unique_atoms
+        all_properties = unique_properties
     
     # Convert ASE atoms to the required format
     dataset_data = convert_ase_to_dataset_format(all_atoms, all_properties, include_charges, remove_h)
@@ -480,7 +545,9 @@ def retrieve_dataloaders(cfg):
             split_ratios=getattr(cfg, 'split_ratios', (0.8, 0.1, 0.1)),
             seed=getattr(cfg, 'seed', 42),
             include_charges=cfg.include_charges,
-            remove_h=cfg.remove_h
+            remove_h=cfg.remove_h,
+            remove_duplicates=getattr(cfg, 'remove_duplicates', True),
+            duplicate_tolerance=getattr(cfg, 'duplicate_tolerance', 1e-6)
         )
         
         # Convert units if needed (ASE typically uses eV, Angstrom)

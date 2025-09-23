@@ -79,6 +79,10 @@ parser.add_argument('--ase_db_path', type=str, default=None,
                     help='Path to ASE database file (required when using ase_db dataset)')
 parser.add_argument('--split_ratios', nargs=3, type=float, default=[0.8, 0.1, 0.1],
                     help='Train, validation, test split ratios for ASE database (should sum to 1.0)')
+parser.add_argument('--remove_duplicates', type=eval, default=True,
+                    help='Remove duplicate molecules from ASE database based on geometry (True/False)')
+parser.add_argument('--duplicate_tolerance', type=float, default=1e-6,
+                    help='Tolerance for considering two molecules as duplicates (default: 1e-6)')
 parser.add_argument('--ase_to_eV', type=str, default='{}',
                     help='JSON string of unit conversion factors for ASE data (e.g., {"energy": 27.2114})')
 parser.add_argument('--filter_n_atoms', type=int, default=None,
