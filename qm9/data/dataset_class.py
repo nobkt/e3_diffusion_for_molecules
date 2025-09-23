@@ -33,19 +33,29 @@ class ProcessedDataset(Dataset):
 
         self.data = data
 
-        if num_pts < 0:
-            self.num_pts = len(data['charges'])
+        # Determine number of data points - use charges if available, otherwise use num_atoms or positions
+        if 'charges' in data and len(data['charges']) > 0:
+            self.data_length = len(data['charges'])
+        elif 'num_atoms' in data:
+            self.data_length = len(data['num_atoms'])
+        elif 'positions' in data:
+            self.data_length = len(data['positions'])
         else:
-            if num_pts > len(data['charges']):
-                logging.warning('Desired number of points ({}) is greater than the number of data points ({}) available in the dataset!'.format(num_pts, len(data['charges'])))
-                self.num_pts = len(data['charges'])
+            self.data_length = 0
+
+        if num_pts < 0:
+            self.num_pts = self.data_length
+        else:
+            if num_pts > self.data_length:
+                logging.warning('Desired number of points ({}) is greater than the number of data points ({}) available in the dataset!'.format(num_pts, self.data_length))
+                self.num_pts = self.data_length
             else:
                 self.num_pts = num_pts
 
         # If included species is not specified
         if included_species is None:
             included_species = torch.unique(self.data['charges'], sorted=True)
-            if included_species[0] == 0:
+            if len(included_species) > 0 and included_species[0] == 0:
                 included_species = included_species[1:]
 
         if subtract_thermo:
@@ -59,18 +69,29 @@ class ProcessedDataset(Dataset):
 
         self.included_species = included_species
 
-        self.data['one_hot'] = self.data['charges'].unsqueeze(-1) == included_species.unsqueeze(0).unsqueeze(0)
+        # Handle empty datasets gracefully
+        if len(included_species) > 0:
+            self.data['one_hot'] = self.data['charges'].unsqueeze(-1) == included_species.unsqueeze(0).unsqueeze(0)
+            self.max_charge = max(included_species)
+        else:
+            # For empty datasets, create an empty one_hot tensor with correct shape
+            # The shape should be [num_pts, max_atoms, 0] to match positions dimension
+            if 'positions' in self.data:
+                max_atoms = self.data['positions'].size(1)
+                self.data['one_hot'] = torch.empty(self.num_pts, max_atoms, 0, dtype=torch.bool)
+            else:
+                self.data['one_hot'] = torch.empty(self.num_pts, 0, dtype=torch.bool)
+            self.max_charge = 0
 
         self.num_species = len(included_species)
-        self.max_charge = max(included_species)
 
         self.parameters = {'num_species': self.num_species, 'max_charge': self.max_charge}
 
         # Get a dictionary of statistics for all properties that are one-dimensional tensors.
         self.calc_stats()
 
-        if shuffle:
-            self.perm = torch.randperm(len(data['charges']))[:self.num_pts]
+        if shuffle and self.num_pts > 0:
+            self.perm = torch.randperm(self.data_length)[:self.num_pts]
         else:
             self.perm = None
 
@@ -97,5 +118,9 @@ class ProcessedDataset(Dataset):
                 result[key] = val
             else:
                 # Regular data - index with idx
-                result[key] = val[idx]
+                # Handle empty tensors (like charges when include_charges=False)
+                if isinstance(val, torch.Tensor) and val.numel() == 0:
+                    result[key] = val  # Keep empty tensor as-is
+                else:
+                    result[key] = val[idx]
         return result

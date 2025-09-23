@@ -483,12 +483,15 @@ def retrieve_dataloaders(cfg):
         
         # Construct PyTorch dataloaders from datasets
         preprocess = PreprocessQM9(load_charges=cfg.include_charges)
-        dataloaders = {split: DataLoader(dataset,
-                                         batch_size=batch_size,
-                                         shuffle=(split == 'train'),
-                                         num_workers=num_workers,
-                                         collate_fn=preprocess.collate_fn)
-                       for split, dataset in datasets.items()}
+        dataloaders = {}
+        for split, dataset in datasets.items():
+            # Handle empty datasets - don't shuffle empty datasets to avoid RandomSampler error
+            should_shuffle = (split == 'train') and (len(dataset) > 0)
+            dataloaders[split] = DataLoader(dataset,
+                                           batch_size=batch_size,
+                                           shuffle=should_shuffle,
+                                           num_workers=num_workers,
+                                           collate_fn=preprocess.collate_fn)
         
     elif 'qm9' in cfg.dataset:
         batch_size = cfg.batch_size
@@ -513,12 +516,15 @@ def retrieve_dataloaders(cfg):
 
         # Construct PyTorch dataloaders from datasets
         preprocess = PreprocessQM9(load_charges=cfg.include_charges)
-        dataloaders = {split: DataLoader(dataset,
-                                         batch_size=batch_size,
-                                         shuffle=args.shuffle if (split == 'train') else False,
-                                         num_workers=num_workers,
-                                         collate_fn=preprocess.collate_fn)
-                             for split, dataset in datasets.items()}
+        dataloaders = {}
+        for split, dataset in datasets.items():
+            # Handle empty datasets - don't shuffle empty datasets to avoid RandomSampler error
+            should_shuffle = (args.shuffle if (split == 'train') else False) and (len(dataset) > 0)
+            dataloaders[split] = DataLoader(dataset,
+                                           batch_size=batch_size,
+                                           shuffle=should_shuffle,
+                                           num_workers=num_workers,
+                                           collate_fn=preprocess.collate_fn)
     elif 'geom' in cfg.dataset:
         import build_geom_dataset
         from configs.datasets_config import get_dataset_info

@@ -54,8 +54,8 @@ def drop_zeros(props, to_keep):
     elif props.dim() == 1:
         # 1D tensors (global properties) don't need atom masking
         return props
-    elif props.dim() == 2 and props.size(1) != to_keep.size(0):
-        # 2D tensors that don't match the number of atoms (e.g., global features) 
+    elif props.dim() >= 2 and props.size(1) != to_keep.size(0):
+        # Tensors that don't match the number of atoms (e.g., global features, empty one_hot) 
         # don't need atom masking
         return props
     else:
@@ -95,13 +95,36 @@ class PreprocessQM9:
         for key in metadata_keys:
             collated_batch[key] = batch[0][key]  # Just take from first sample
 
-        to_keep = (collated_batch['charges'].sum(0) > 0)
+        # Handle the case where charges might be empty (when include_charges=False)
+        if collated_batch['charges'].numel() > 0:
+            to_keep = (collated_batch['charges'].sum(0) > 0)
+        else:
+            # When charges is empty, determine to_keep based on actual molecule sizes
+            batch_size = collated_batch['positions'].size(0)
+            max_atoms = collated_batch['positions'].size(1)
+            num_atoms_batch = collated_batch['num_atoms']
+            
+            # Create a mask for atoms that exist in any molecule in the batch
+            atom_exists = torch.zeros(max_atoms, dtype=torch.bool)
+            for n_atoms in num_atoms_batch:
+                if n_atoms > 0:
+                    atom_exists[:n_atoms] = True
+            to_keep = atom_exists
 
         # Apply drop_zeros only to data keys, not metadata
         for key in data_keys:
             collated_batch[key] = drop_zeros(collated_batch[key], to_keep)
 
-        atom_mask = collated_batch['charges'] > 0
+        if collated_batch['charges'].numel() > 0:
+            atom_mask = collated_batch['charges'] > 0
+        else:
+            # When charges is empty, create atom mask based on positions and num_atoms
+            batch_size = collated_batch['positions'].size(0)
+            n_nodes = collated_batch['positions'].size(1)
+            atom_mask = torch.zeros(batch_size, n_nodes, dtype=torch.bool)
+            for i, n_atoms in enumerate(collated_batch['num_atoms']):
+                atom_mask[i, :n_atoms] = True
+        
         collated_batch['atom_mask'] = atom_mask
 
         #Obtain edges
