@@ -75,10 +75,11 @@ class ProcessedDataset(Dataset):
             self.max_charge = max(included_species)
         else:
             # For empty datasets, create an empty one_hot tensor with correct shape
-            # The shape should be [num_pts, max_atoms, 0] to match positions dimension
+            # The shape should be [num_molecules, max_atoms, 0] to match positions dimension
             if 'positions' in self.data:
+                num_molecules = self.data['positions'].size(0)
                 max_atoms = self.data['positions'].size(1)
-                self.data['one_hot'] = torch.empty(self.num_pts, max_atoms, 0, dtype=torch.bool)
+                self.data['one_hot'] = torch.empty(num_molecules, max_atoms, 0, dtype=torch.bool)
             else:
                 self.data['one_hot'] = torch.empty(self.num_pts, 0, dtype=torch.bool)
             self.max_charge = 0
@@ -119,8 +120,10 @@ class ProcessedDataset(Dataset):
             else:
                 # Regular data - index with idx
                 # Handle empty tensors (like charges when include_charges=False)
-                if isinstance(val, torch.Tensor) and val.numel() == 0:
+                if isinstance(val, torch.Tensor) and val.numel() == 0 and val.dim() <= 1:
+                    # Only skip indexing for 0D or 1D empty tensors (global properties)
                     result[key] = val  # Keep empty tensor as-is
                 else:
+                    # Index all other tensors, including empty multi-dimensional ones like one_hot
                     result[key] = val[idx]
         return result

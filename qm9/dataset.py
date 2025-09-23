@@ -123,14 +123,9 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
         if all_species[0] == 0:
             all_species = all_species[1:]
     else:
-        # When charges are not included, determine species from the all_atoms
-        all_atomic_numbers = set()
-        for atoms in all_atoms:
-            atomic_numbers = atoms.numbers
-            if remove_h:
-                atomic_numbers = atomic_numbers[atomic_numbers != 1]
-            all_atomic_numbers.update(atomic_numbers)
-        all_species = torch.tensor(sorted(list(all_atomic_numbers)), dtype=torch.long)
+        # When charges are not included, we don't need species information
+        # Set to empty tensor to avoid one_hot tensor creation issues
+        all_species = torch.tensor([], dtype=torch.long)
     
     # Create ProcessedDataset objects
     processed_datasets = {}
@@ -143,7 +138,7 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
         )
     
     num_species = len(all_species)
-    charge_scale = torch.max(all_species).item()  # For compatibility
+    charge_scale = torch.max(all_species).item() if len(all_species) > 0 else 1  # For compatibility
     
     return processed_datasets, num_species, charge_scale
 

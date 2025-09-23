@@ -96,7 +96,7 @@ def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device, dt
 
 def check_mask_correct(variables, node_mask):
     for i, variable in enumerate(variables):
-        if len(variable) > 0:
+        if variable.numel() > 0:  # Use numel() instead of len() to check for empty tensors
             assert_correctly_masked(variable, node_mask)
 
 

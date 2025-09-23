@@ -52,6 +52,9 @@ def assert_mean_zero_with_mask(x, node_mask, eps=1e-10):
 
 
 def assert_correctly_masked(variable, node_mask):
+    # Skip masking check for empty tensors
+    if variable.numel() == 0:
+        return
     assert (variable * (1 - node_mask)).abs().max().item() < 1e-4, \
         'Variables not masked properly.'
 
