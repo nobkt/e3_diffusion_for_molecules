@@ -258,29 +258,57 @@ def coord2diff(x, edge_index, norm_constant=1):
 def unsorted_segment_sum(data, segment_ids, num_segments, normalization_factor, aggregation_method: str):
     """Custom PyTorch op to replicate TensorFlow's `unsorted_segment_sum`.
         Normalization: 'sum' or 'mean'.
+        
+    Improvements for numerical stability:
+    - Input validation and clipping
+    - Safer division with epsilon
+    - More robust NaN/inf handling
     """
+    # Input validation and clipping for numerical stability
+    if torch.any(torch.isnan(data)) or torch.any(torch.isinf(data)):
+        print("Warning: NaN or inf detected in input data to unsorted_segment_sum, clipping to safe range")
+        data = torch.clamp(data, min=-1e6, max=1e6)
+        data = torch.where(torch.isnan(data), torch.zeros_like(data), data)
+    
+    # Clip extremely large values to prevent overflow
+    data = torch.clamp(data, min=-1e8, max=1e8)
+    
     result_shape = (num_segments, data.size(1))
     result = data.new_full(result_shape, 0)  # Init empty result tensor.
     segment_ids = segment_ids.unsqueeze(-1).expand(-1, data.size(1))
     result.scatter_add_(0, segment_ids, data)
     
     if aggregation_method == 'sum':
-        # Add numerical stability check
-        if normalization_factor > 0:
-            result = result / normalization_factor
+        # Improved numerical stability with epsilon and bounds checking
+        if normalization_factor > 1e-12:  # More conservative threshold
+            # Apply normalization with numerical stability
+            result = result / max(normalization_factor, 1e-12)
         else:
-            print("Warning: normalization_factor is zero or negative, skipping normalization")
+            print(f"Warning: normalization_factor {normalization_factor} is too small, using 1e-12")
+            result = result / 1e-12
 
-    if aggregation_method == 'mean':
+    elif aggregation_method == 'mean':
         norm = data.new_zeros(result.shape)
         norm.scatter_add_(0, segment_ids, data.new_ones(data.shape))
-        norm[norm == 0] = 1  # Avoid division by zero
+        # More robust division by zero handling
+        norm = torch.clamp(norm, min=1e-12)  # Ensure minimum value
         result = result / norm
     
-    # Check for NaN or inf values and replace with zeros
-    if torch.any(torch.isnan(result)) or torch.any(torch.isinf(result)):
+    # More comprehensive NaN/inf checking and replacement
+    nan_mask = torch.isnan(result)
+    inf_mask = torch.isinf(result)
+    invalid_mask = nan_mask | inf_mask
+    
+    if torch.any(invalid_mask):
         print("Warning: NaN or inf detected in unsorted_segment_sum output, replacing with zeros")
-        result = torch.where(torch.isnan(result) | torch.isinf(result), 
-                            torch.zeros_like(result), result)
+        result = torch.where(invalid_mask, torch.zeros_like(result), result)
+        
+        # Additional safety: clip remaining values to reasonable range
+        result = torch.clamp(result, min=-1e6, max=1e6)
+    
+    # Final safety check: ensure no extreme values remain
+    if torch.any(torch.abs(result) > 1e6):
+        print("Warning: Extremely large values detected in unsorted_segment_sum, applying final clipping")
+        result = torch.clamp(result, min=-1e6, max=1e6)
     
     return result

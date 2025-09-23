@@ -196,7 +196,7 @@ optim = get_optim(args, model)
 
 
 gradnorm_queue = utils.Queue()
-gradnorm_queue.add(3000)  # Add large value that will be flushed.
+gradnorm_queue.add(100)  # Start with reasonable value instead of extremely large one
 
 
 def main():

@@ -48,21 +48,55 @@ class Queue():
 
 
 def gradient_clipping(flow, gradnorm_queue):
-    # Allow gradient norm to be 150% + 2 * stdev of the recent history.
-    max_grad_norm = 1.5 * gradnorm_queue.mean() + 2 * gradnorm_queue.std()
+    # Enhanced gradient clipping for numerical stability
+    
+    # First, check for NaN or inf gradients
+    total_norm = 0.0
+    nan_detected = False
+    
+    for p in flow.parameters():
+        if p.grad is not None:
+            if torch.any(torch.isnan(p.grad)) or torch.any(torch.isinf(p.grad)):
+                print("Warning: NaN or inf gradients detected, zeroing them out")
+                p.grad = torch.zeros_like(p.grad)
+                nan_detected = True
+            else:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+    
+    total_norm = total_norm ** (1. / 2)
+    
+    # If gradients were corrupted, use a conservative clipping value
+    if nan_detected or total_norm > 1e6:
+        max_grad_norm = 100.0  # Conservative fallback
+        print(f"Using conservative gradient clipping due to instability: {max_grad_norm}")
+    else:
+        # Allow gradient norm to be 150% + 2 * stdev of the recent history.
+        # But cap the maximum to prevent runaway training
+        max_grad_norm = min(1.5 * gradnorm_queue.mean() + 2 * gradnorm_queue.std(), 1000.0)
+    
+    # Additional safety: if queue has extreme values, reset to reasonable range
+    if gradnorm_queue.mean() > 1e4:
+        print("Warning: Gradient norm history has extreme values, resetting queue")
+        gradnorm_queue.items = [100.0] * len(gradnorm_queue.items)
+        max_grad_norm = 100.0
 
     # Clips gradient and returns the norm
     grad_norm = torch.nn.utils.clip_grad_norm_(
         flow.parameters(), max_norm=max_grad_norm, norm_type=2.0)
 
+    # Add to queue with safety bounds
     if float(grad_norm) > max_grad_norm:
         gradnorm_queue.add(float(max_grad_norm))
     else:
-        gradnorm_queue.add(float(grad_norm))
+        # Clamp the gradient norm to reasonable range before adding to queue
+        safe_grad_norm = min(float(grad_norm), 1e4)
+        gradnorm_queue.add(safe_grad_norm)
 
     if float(grad_norm) > max_grad_norm:
         print(f'Clipped gradient with value {grad_norm:.1f} '
               f'while allowed {max_grad_norm:.1f}')
+    
     return grad_norm
 
 

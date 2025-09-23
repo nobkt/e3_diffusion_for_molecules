@@ -97,10 +97,16 @@ class EGNN_dynamics_QM9(nn.Module):
 
         vel = vel.view(bs, n_nodes, -1)
 
+        # Enhanced numerical stability checking
         if torch.any(torch.isnan(vel)) or torch.any(torch.isinf(vel)):
             print('Warning: detected nan or inf in EGNN output, resetting to zero.')
             vel = torch.where(torch.isnan(vel) | torch.isinf(vel), 
                              torch.zeros_like(vel), vel)
+        
+        # Additional safety: clip extremely large velocities
+        if torch.any(torch.abs(vel) > 1e3):
+            print('Warning: detected extremely large velocities, clipping to safe range.')
+            vel = torch.clamp(vel, min=-1e3, max=1e3)
 
         if node_mask is None:
             vel = remove_mean(vel)

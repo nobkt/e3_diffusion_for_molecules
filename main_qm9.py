@@ -125,8 +125,8 @@ parser.add_argument('--include_charges', type=eval, default=True,
                     help='include atom charge or not')
 parser.add_argument('--visualize_every_batch', type=int, default=1e8,
                     help="Can be used to visualize multiple times per epoch")
-parser.add_argument('--normalization_factor', type=float, default=1,
-                    help="Normalize the sum aggregation of EGNN")
+parser.add_argument('--normalization_factor', type=float, default=100,
+                    help="Normalize the sum aggregation of EGNN. Higher values (e.g., 100) provide better numerical stability.")
 parser.add_argument('--aggregation_method', type=str, default='sum',
                     help='"sum" or "mean"')
 args = parser.parse_args()
@@ -233,7 +233,7 @@ optim = get_optim(args, model)
 # print(model)
 
 gradnorm_queue = utils.Queue()
-gradnorm_queue.add(3000)  # Add large value that will be flushed.
+gradnorm_queue.add(100)  # Start with reasonable value instead of extremely large one
 
 
 def check_mask_correct(variables, node_mask):

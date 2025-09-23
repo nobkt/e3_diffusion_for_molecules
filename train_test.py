@@ -52,8 +52,21 @@ def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device, dt
         # transform batch through flow
         nll, reg_term, mean_abs_z = losses.compute_loss_and_nll(args, model_dp, nodes_dist,
                                                                 x, h, node_mask, edge_mask, context)
+        
+        # Early detection of training instability
+        if torch.isnan(nll) or torch.isinf(nll) or nll.item() > 1e6:
+            print(f"Warning: Unstable loss detected (NLL: {nll.item():.2e}). Skipping this batch.")
+            # Skip this batch and continue
+            continue
+            
         # standard nll from forward KL
         loss = nll + args.ode_regularization * reg_term
+        
+        # Additional safety check for total loss
+        if torch.isnan(loss) or torch.isinf(loss) or loss.item() > 1e6:
+            print(f"Warning: Unstable total loss detected (Loss: {loss.item():.2e}). Skipping this batch.")
+            continue
+            
         loss.backward()
 
         if args.clip_grad:
