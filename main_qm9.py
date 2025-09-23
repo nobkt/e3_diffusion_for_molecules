@@ -123,6 +123,13 @@ parser.add_argument('--aggregation_method', type=str, default='sum',
                     help='"sum" or "mean"')
 args = parser.parse_args()
 
+# For ASE databases, atomic charges are not included in the database
+# so we should default to include_charges=False
+if 'ase_db' in args.dataset and args.include_charges:
+    print("Warning: For ASE databases, atomic charges are not included in the database.")
+    print("Setting include_charges=False automatically.")
+    args.include_charges = False
+
 # Parse unit conversion for ASE data
 import json
 try:
