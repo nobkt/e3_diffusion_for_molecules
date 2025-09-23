@@ -418,7 +418,9 @@ class EnVariationalDiffusion(torch.nn.Module):
         mu_T_x, mu_T_h = mu_T[:, :, :self.n_dims], mu_T[:, :, self.n_dims:]
 
         # Compute standard deviations (only batch axis for x-part, inflated for h-part).
-        sigma_T_x = self.sigma(gamma_T, mu_T_x).squeeze()  # Remove inflate, only keep batch dimension for x-part.
+        sigma_T_x = self.sigma(gamma_T, mu_T_x)
+        # Ensure sigma_T_x is 1D (batch dimension only) for gaussian_KL_for_dimension
+        sigma_T_x = sigma_T_x.view(sigma_T_x.size(0))  # Reshape to (batch_size,)
         sigma_T_h = self.sigma(gamma_T, mu_T_h)
 
         # Compute KL for h-part.
@@ -426,9 +428,11 @@ class EnVariationalDiffusion(torch.nn.Module):
         kl_distance_h = gaussian_KL(mu_T_h, sigma_T_h, zeros, ones, node_mask)
 
         # Compute KL for x-part.
-        zeros, ones = torch.zeros_like(mu_T_x), torch.ones_like(sigma_T_x)
+        # Ensure mu_T_x is properly shaped for gaussian_KL_for_dimension (batch_size,)
+        mu_T_x_flat = mu_T_x.reshape(mu_T_x.size(0), -1).mean(dim=1)  # Average over spatial dimensions
+        zeros, ones = torch.zeros_like(mu_T_x_flat), torch.ones_like(sigma_T_x)
         subspace_d = self.subspace_dimensionality(node_mask)
-        kl_distance_x = gaussian_KL_for_dimension(mu_T_x, sigma_T_x, zeros, ones, d=subspace_d)
+        kl_distance_x = gaussian_KL_for_dimension(mu_T_x_flat, sigma_T_x, zeros, ones, d=subspace_d)
 
         return kl_distance_x + kl_distance_h
 

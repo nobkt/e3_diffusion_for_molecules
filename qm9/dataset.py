@@ -9,7 +9,7 @@ import numpy as np
 
 
 def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_charges=False, remove_h=False, 
-                      remove_duplicates=True, duplicate_tolerance=1e-6):
+                      remove_duplicates=True, duplicate_tolerance=1e-6, debug_csv_path=None, debug_xyz_path=None):
     """
     Load dataset from ASE database format.
     
@@ -34,6 +34,10 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
         Whether to remove duplicate molecules based on geometry comparison
     duplicate_tolerance : float
         Tolerance for considering two molecules as duplicates based on position differences
+    debug_csv_path : str, optional
+        Path to save CSV file with dataset composition analysis
+    debug_xyz_path : str, optional
+        Directory path to save XYZ files for all molecules
         
     Returns
     -------
@@ -77,9 +81,13 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
     # Remove duplicates if requested
     if remove_duplicates and len(all_atoms) > 1:
         print("Detecting and removing duplicate molecules...")
+        print(f"Using duplicate tolerance: {duplicate_tolerance} Angstrom")
         unique_atoms = []
         unique_properties = []
         duplicate_count = 0
+        
+        # Keep track of first few duplicates for debugging
+        duplicate_examples = []
         
         for i, (atoms, properties) in enumerate(zip(all_atoms, all_properties)):
             # Process atoms first (remove H if requested) for comparison
@@ -118,6 +126,15 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
                     torch.allclose(pos, unique_pos, atol=duplicate_tolerance)):
                     is_duplicate = True
                     duplicate_count += 1
+                    
+                    # Store first few duplicate examples for debugging
+                    if len(duplicate_examples) < 3:
+                        duplicate_examples.append({
+                            'molecule_id': i,
+                            'duplicate_of': len(unique_atoms) - 1,
+                            'atomic_nums': atomic_nums.tolist(),
+                            'pos_diff_max': torch.max(torch.abs(pos - unique_pos)).item() if len(pos) > 0 else 0.0
+                        })
                     break
             
             if not is_duplicate:
@@ -127,9 +144,17 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
         print(f"Removed {duplicate_count} duplicate molecules")
         print(f"Keeping {len(unique_atoms)} unique molecules")
         
+        # Show duplicate examples for debugging
+        if duplicate_examples:
+            print("\nDuplicate detection examples (first few):")
+            for example in duplicate_examples:
+                print(f"  Molecule {example['molecule_id']} is duplicate of molecule {example['duplicate_of']} "
+                      f"(max position difference: {example['pos_diff_max']:.6f} Angstrom)")
+        
         if len(unique_atoms) < 10:
             print(f"WARNING: Only {len(unique_atoms)} unique molecules found. This may cause training instability.")
             print("Consider using a more diverse dataset or setting remove_duplicates=False.")
+            print("You can also try increasing --duplicate_tolerance if molecules are similar but not identical.")
         
         all_atoms = unique_atoms
         all_properties = unique_properties
@@ -216,7 +241,104 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
     num_species = len(all_species)
     charge_scale = torch.max(all_species).item() if len(all_species) > 0 else 1  # For compatibility
     
+    # Generate debug outputs if requested
+    if debug_csv_path or debug_xyz_path:
+        _generate_debug_outputs(all_atoms, all_properties, all_species, debug_csv_path, debug_xyz_path, remove_h)
+    
     return processed_datasets, num_species, charge_scale
+
+
+def _generate_debug_outputs(atoms_list, properties_list, all_species, csv_path=None, xyz_path=None, remove_h=False):
+    """
+    Generate debugging outputs for dataset analysis.
+    
+    Parameters
+    ----------
+    atoms_list : list of ase.Atoms
+        List of ASE Atoms objects
+    properties_list : list of dict
+        List of molecular properties dictionaries
+    all_species : torch.Tensor
+        Tensor of unique atomic species
+    csv_path : str, optional
+        Path to save CSV file with composition analysis
+    xyz_path : str, optional
+        Directory to save XYZ files
+    remove_h : bool
+        Whether hydrogen atoms are removed
+    """
+    import csv
+    import os
+    
+    if csv_path:
+        print(f"Generating dataset composition CSV at: {csv_path}")
+        
+        # Create CSV with molecule composition analysis
+        with open(csv_path, 'w', newline='') as csvfile:
+            fieldnames = ['molecule_id', 'num_atoms', 'molecular_formula', 'atomic_numbers', 'positions_summary'] + list(properties_list[0].keys() if properties_list else [])
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for i, (atoms, properties) in enumerate(zip(atoms_list, properties_list)):
+                atomic_numbers = atoms.numbers
+                positions = atoms.positions
+                
+                if remove_h:
+                    mask = atomic_numbers != 1
+                    atomic_numbers = atomic_numbers[mask]
+                    positions = positions[mask]
+                
+                # Generate molecular formula
+                from collections import Counter
+                element_count = Counter(atomic_numbers)
+                molecular_formula = ""
+                for atomic_num in sorted(element_count.keys()):
+                    count = element_count[atomic_num]
+                    # Convert atomic number to symbol (simplified)
+                    symbol_map = {1: 'H', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 14: 'Si', 15: 'P', 16: 'S', 17: 'Cl', 35: 'Br', 53: 'I'}
+                    symbol = symbol_map.get(atomic_num, f'Z{atomic_num}')
+                    molecular_formula += f"{symbol}{count if count > 1 else ''}"
+                
+                row = {
+                    'molecule_id': i,
+                    'num_atoms': len(atomic_numbers),
+                    'molecular_formula': molecular_formula,
+                    'atomic_numbers': ','.join(map(str, atomic_numbers)),
+                    'positions_summary': f"min:{positions.min():.3f},max:{positions.max():.3f},center:({positions.mean(axis=0)[0]:.3f},{positions.mean(axis=0)[1]:.3f},{positions.mean(axis=0)[2]:.3f})"
+                }
+                row.update(properties)
+                writer.writerow(row)
+        
+        print(f"CSV file saved with {len(atoms_list)} molecules")
+    
+    if xyz_path:
+        print(f"Generating XYZ files in directory: {xyz_path}")
+        
+        # Create directory if it doesn't exist
+        os.makedirs(xyz_path, exist_ok=True)
+        
+        # Create XYZ files for each molecule
+        for i, atoms in enumerate(atoms_list):
+            atomic_numbers = atoms.numbers
+            positions = atoms.positions
+            
+            if remove_h:
+                mask = atomic_numbers != 1
+                atomic_numbers = atomic_numbers[mask]
+                positions = positions[mask]
+            
+            xyz_filename = os.path.join(xyz_path, f"molecule_{i:04d}.xyz")
+            with open(xyz_filename, 'w') as f:
+                f.write(f"{len(atomic_numbers)}\n")
+                f.write(f"Molecule {i} from ASE database\n")
+                
+                # Convert atomic numbers to symbols
+                symbol_map = {1: 'H', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 14: 'Si', 15: 'P', 16: 'S', 17: 'Cl', 35: 'Br', 53: 'I'}
+                for atomic_num, pos in zip(atomic_numbers, positions):
+                    symbol = symbol_map.get(atomic_num, f'Z{atomic_num}')
+                    f.write(f"{symbol} {pos[0]:.9f} {pos[1]:.9f} {pos[2]:.9f}\n")
+        
+        print(f"Generated {len(atoms_list)} XYZ files")
 
 
 def update_ase_dataset_config(atoms_list, remove_h=False):
@@ -547,7 +669,9 @@ def retrieve_dataloaders(cfg):
             include_charges=cfg.include_charges,
             remove_h=cfg.remove_h,
             remove_duplicates=getattr(cfg, 'remove_duplicates', True),
-            duplicate_tolerance=getattr(cfg, 'duplicate_tolerance', 1e-6)
+            duplicate_tolerance=getattr(cfg, 'duplicate_tolerance', 1e-6),
+            debug_csv_path=getattr(cfg, 'debug_dataset_csv', None),
+            debug_xyz_path=getattr(cfg, 'debug_dataset_xyz', None)
         )
         
         # Convert units if needed (ASE typically uses eV, Angstrom)

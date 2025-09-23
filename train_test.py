@@ -146,6 +146,10 @@ def test(args, loader, epoch, eval_model, device, dtype, property_norms, nodes_d
                 print(f"\r {partition} NLL \t epoch: {epoch}, iter: {i}/{n_iterations}, "
                       f"NLL: {nll_epoch/n_samples:.2f}")
 
+    if n_samples == 0:
+        print(f"Warning: {partition} set is empty, returning NLL = 0")
+        return 0.0
+    
     return nll_epoch/n_samples
 
 
