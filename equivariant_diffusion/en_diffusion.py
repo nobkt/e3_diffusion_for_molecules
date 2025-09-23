@@ -224,7 +224,7 @@ class PredefinedNoiseSchedule(torch.nn.Module):
 
     def forward(self, t):
         t_int = torch.round(t * self.timesteps).long()
-        return self.gamma[t_int]
+        return self.gamma[t_int].view(t.size(0))
 
 
 class GammaNetwork(torch.nn.Module):
