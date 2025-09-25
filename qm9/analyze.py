@@ -224,6 +224,14 @@ def check_stability(positions, atom_type, dataset_info, debug=False):
 
     for i in range(len(x)):
         for j in range(i + 1, len(x)):
+            # Defensive bounds checking to prevent IndexError
+            if atom_type[i] >= len(atom_decoder) or atom_type[j] >= len(atom_decoder):
+                if debug:
+                    print(f"Warning: Atom type index out of bounds. "
+                          f"atom_type[{i}]={atom_type[i]}, atom_type[{j}]={atom_type[j]}, "
+                          f"decoder length={len(atom_decoder)}")
+                continue
+            
             p1 = np.array([x[i], y[i], z[i]])
             p2 = np.array([x[j], y[j], z[j]])
             dist = np.sqrt(np.sum((p1 - p2) ** 2))
@@ -244,13 +252,25 @@ def check_stability(positions, atom_type, dataset_info, debug=False):
             nr_bonds[j] += order
     nr_stable_bonds = 0
     for atom_type_i, nr_bonds_i in zip(atom_type, nr_bonds):
-        possible_bonds = bond_analyze.allowed_bonds[atom_decoder[atom_type_i]]
+        # Defensive bounds checking to prevent IndexError
+        if atom_type_i >= len(atom_decoder):
+            if debug:
+                print(f"Warning: Atom type index {atom_type_i} out of bounds for decoder length {len(atom_decoder)}")
+            continue
+            
+        atom_symbol = atom_decoder[atom_type_i]
+        if atom_symbol not in bond_analyze.allowed_bonds:
+            if debug:
+                print(f"Warning: Atom type '{atom_symbol}' not found in allowed_bonds dictionary")
+            continue
+            
+        possible_bonds = bond_analyze.allowed_bonds[atom_symbol]
         if type(possible_bonds) == int:
             is_stable = possible_bonds == nr_bonds_i
         else:
             is_stable = nr_bonds_i in possible_bonds
         if not is_stable and debug:
-            print("Invalid bonds for molecule %s with %d bonds" % (atom_decoder[atom_type_i], nr_bonds_i))
+            print("Invalid bonds for molecule %s with %d bonds" % (atom_symbol, nr_bonds_i))
         nr_stable_bonds += int(is_stable)
 
     molecule_stable = nr_stable_bonds == len(x)
