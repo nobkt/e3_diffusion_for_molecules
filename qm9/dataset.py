@@ -82,82 +82,9 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
     if remove_duplicates and len(all_atoms) > 1:
         print("Detecting and removing duplicate molecules...")
         print(f"Using duplicate tolerance: {duplicate_tolerance} Angstrom")
-        unique_atoms = []
-        unique_properties = []
-        duplicate_count = 0
-        
-        # Keep track of first few duplicates for debugging
-        duplicate_examples = []
-        
-        for i, (atoms, properties) in enumerate(zip(all_atoms, all_properties)):
-            # Process atoms first (remove H if requested) for comparison
-            pos = torch.tensor(atoms.positions, dtype=torch.float32)
-            atomic_nums = torch.tensor(atoms.numbers, dtype=torch.long)
-            
-            if remove_h:
-                mask = atomic_nums != 1
-                pos = pos[mask]
-                atomic_nums = atomic_nums[mask]
-            
-            # Center the molecule for comparison
-            if len(pos) > 0:
-                pos = pos - pos.mean(dim=0)
-            
-            # Check if this molecule is a duplicate
-            is_duplicate = False
-            for unique_atoms_obj in unique_atoms:
-                # Process unique molecule for comparison
-                unique_pos = torch.tensor(unique_atoms_obj.positions, dtype=torch.float32)
-                unique_atomic_nums = torch.tensor(unique_atoms_obj.numbers, dtype=torch.long)
-                
-                if remove_h:
-                    unique_mask = unique_atomic_nums != 1
-                    unique_pos = unique_pos[unique_mask]
-                    unique_atomic_nums = unique_atomic_nums[unique_mask]
-                
-                # Center the unique molecule
-                if len(unique_pos) > 0:
-                    unique_pos = unique_pos - unique_pos.mean(dim=0)
-                
-                # Compare molecules
-                if (len(pos) == len(unique_pos) and 
-                    torch.allclose(atomic_nums, unique_atomic_nums) and
-                    len(pos) > 0 and
-                    torch.allclose(pos, unique_pos, atol=duplicate_tolerance)):
-                    is_duplicate = True
-                    duplicate_count += 1
-                    
-                    # Store first few duplicate examples for debugging
-                    if len(duplicate_examples) < 3:
-                        duplicate_examples.append({
-                            'molecule_id': i,
-                            'duplicate_of': len(unique_atoms) - 1,
-                            'atomic_nums': atomic_nums.tolist(),
-                            'pos_diff_max': torch.max(torch.abs(pos - unique_pos)).item() if len(pos) > 0 else 0.0
-                        })
-                    break
-            
-            if not is_duplicate:
-                unique_atoms.append(atoms)
-                unique_properties.append(properties)
-        
-        print(f"Removed {duplicate_count} duplicate molecules")
-        print(f"Keeping {len(unique_atoms)} unique molecules")
-        
-        # Show duplicate examples for debugging
-        if duplicate_examples:
-            print("\nDuplicate detection examples (first few):")
-            for example in duplicate_examples:
-                print(f"  Molecule {example['molecule_id']} is duplicate of molecule {example['duplicate_of']} "
-                      f"(max position difference: {example['pos_diff_max']:.6f} Angstrom)")
-        
-        if len(unique_atoms) < 10:
-            print(f"WARNING: Only {len(unique_atoms)} unique molecules found. This may cause training instability.")
-            print("Consider using a more diverse dataset or setting remove_duplicates=False.")
-            print("You can also try increasing --duplicate_tolerance if molecules are similar but not identical.")
-        
-        all_atoms = unique_atoms
-        all_properties = unique_properties
+        all_atoms, all_properties = _remove_duplicates_optimized(
+            all_atoms, all_properties, remove_h, duplicate_tolerance
+        )
     
     # Convert ASE atoms to the required format
     dataset_data = convert_ase_to_dataset_format(all_atoms, all_properties, include_charges, remove_h)
@@ -246,6 +173,213 @@ def load_ase_database(db_path, split_ratios=(0.8, 0.1, 0.1), seed=42, include_ch
         _generate_debug_outputs(all_atoms, all_properties, all_species, debug_csv_path, debug_xyz_path, remove_h)
     
     return processed_datasets, num_species, charge_scale
+
+
+def _remove_duplicates_optimized(all_atoms, all_properties, remove_h, duplicate_tolerance):
+    """
+    Optimized duplicate removal using hashing for O(n log n) performance instead of O(n²).
+    
+    This function uses molecular fingerprints based on sorted atomic numbers and position
+    hashes to quickly identify potential duplicates, then performs detailed comparison
+    only on candidates.
+    
+    Parameters
+    ----------
+    all_atoms : list of ase.Atoms
+        List of ASE Atoms objects
+    all_properties : list of dict  
+        List of property dictionaries
+    remove_h : bool
+        Whether to remove hydrogen atoms for comparison
+    duplicate_tolerance : float
+        Tolerance for position comparison
+        
+    Returns
+    -------
+    unique_atoms : list
+        List of unique ASE Atoms objects
+    unique_properties : list
+        List of corresponding property dictionaries
+    """
+    import hashlib
+    from collections import defaultdict
+    import time
+    
+    n_total = len(all_atoms)
+    print(f"Processing {n_total} molecules for duplicate detection...")
+    
+    # Step 1: Create molecular fingerprints for fast pre-filtering
+    print("Step 1/3: Creating molecular fingerprints...")
+    fingerprint_to_indices = defaultdict(list)
+    processed_molecules = []
+    
+    start_time = time.time()
+    
+    for i, (atoms, properties) in enumerate(zip(all_atoms, all_properties)):
+        # Show progress every 1000 molecules
+        if i > 0 and i % 1000 == 0:
+            elapsed = time.time() - start_time
+            progress = i / n_total
+            eta = elapsed / progress - elapsed if progress > 0 else 0
+            print(f"  Progress: {i}/{n_total} ({progress*100:.1f}%) - ETA: {eta:.0f}s")
+        
+        # Process molecule for comparison
+        pos = torch.tensor(atoms.positions, dtype=torch.float32)
+        atomic_nums = torch.tensor(atoms.numbers, dtype=torch.long)
+        
+        if remove_h:
+            mask = atomic_nums != 1
+            pos = pos[mask]
+            atomic_nums = atomic_nums[mask]
+        
+        # Center the molecule
+        if len(pos) > 0:
+            pos = pos - pos.mean(dim=0)
+        
+        # Create a molecular fingerprint for fast comparison
+        # Fingerprint includes: number of atoms, sorted atomic numbers, and rough position hash
+        atomic_nums_sorted = torch.sort(atomic_nums)[0]  # Sort atomic numbers
+        
+        # Create coarse position bins for hashing (larger than tolerance to catch near-duplicates)
+        position_bins = torch.round(pos / (duplicate_tolerance * 10)).long() if len(pos) > 0 else torch.tensor([], dtype=torch.long)
+        
+        # Create fingerprint string
+        fingerprint_data = f"{len(atomic_nums)}_{atomic_nums_sorted.tolist()}_{position_bins.flatten().tolist()}"
+        fingerprint = hashlib.md5(fingerprint_data.encode()).hexdigest()[:16]  # Use first 16 chars for efficiency
+        
+        # Store processed data
+        processed_molecules.append({
+            'index': i,
+            'atoms': atoms,
+            'properties': properties,
+            'pos': pos,
+            'atomic_nums': atomic_nums,
+            'fingerprint': fingerprint
+        })
+        
+        fingerprint_to_indices[fingerprint].append(i)
+    
+    print(f"Step 1 completed in {time.time() - start_time:.1f}s")
+    print(f"Found {len(fingerprint_to_indices)} unique fingerprints")
+    
+    # Step 2: Detailed comparison only within fingerprint groups
+    print("Step 2/3: Detailed duplicate detection within fingerprint groups...")
+    
+    unique_indices = set()
+    duplicate_count = 0
+    duplicate_examples = []
+    groups_processed = 0
+    
+    start_time = time.time()
+    
+    for fingerprint, indices in fingerprint_to_indices.items():
+        groups_processed += 1
+        if groups_processed % 100 == 0:
+            elapsed = time.time() - start_time
+            progress = groups_processed / len(fingerprint_to_indices)
+            eta = elapsed / progress - elapsed if progress > 0 else 0
+            print(f"  Progress: {groups_processed}/{len(fingerprint_to_indices)} groups ({progress*100:.1f}%) - ETA: {eta:.0f}s")
+        
+        if len(indices) == 1:
+            # No duplicates possible in this group
+            unique_indices.add(indices[0])
+        else:
+            # Detailed comparison needed within this group
+            group_unique_indices = []
+            
+            for i, idx in enumerate(indices):
+                mol_i = processed_molecules[idx]
+                is_duplicate = False
+                
+                # Compare with already selected unique molecules in this group
+                for unique_idx in group_unique_indices:
+                    mol_j = processed_molecules[unique_idx]
+                    
+                    # Detailed comparison
+                    if (_molecules_are_identical(mol_i['pos'], mol_i['atomic_nums'], 
+                                               mol_j['pos'], mol_j['atomic_nums'], 
+                                               duplicate_tolerance)):
+                        is_duplicate = True
+                        duplicate_count += 1
+                        
+                        # Store example for debugging (first few)
+                        if len(duplicate_examples) < 3:
+                            pos_diff = torch.max(torch.abs(mol_i['pos'] - mol_j['pos'])).item() if len(mol_i['pos']) > 0 else 0.0
+                            duplicate_examples.append({
+                                'molecule_id': idx,
+                                'duplicate_of': unique_idx,
+                                'atomic_nums': mol_i['atomic_nums'].tolist(),
+                                'pos_diff_max': pos_diff
+                            })
+                        break
+                
+                if not is_duplicate:
+                    group_unique_indices.append(idx)
+                    unique_indices.add(idx)
+    
+    print(f"Step 2 completed in {time.time() - start_time:.1f}s")
+    
+    # Step 3: Build result lists
+    print("Step 3/3: Building results...")
+    unique_indices_sorted = sorted(list(unique_indices))
+    unique_atoms = [all_atoms[i] for i in unique_indices_sorted]
+    unique_properties = [all_properties[i] for i in unique_indices_sorted]
+    
+    print(f"Removed {duplicate_count} duplicate molecules")
+    print(f"Keeping {len(unique_atoms)} unique molecules")
+    
+    # Show duplicate examples for debugging
+    if duplicate_examples:
+        print("\nDuplicate detection examples (first few):")
+        for example in duplicate_examples:
+            print(f"  Molecule {example['molecule_id']} is duplicate of molecule {example['duplicate_of']} "
+                  f"(max position difference: {example['pos_diff_max']:.6f} Angstrom)")
+    
+    if len(unique_atoms) < 10:
+        print(f"WARNING: Only {len(unique_atoms)} unique molecules found. This may cause training instability.")
+        print("Consider using a more diverse dataset or setting remove_duplicates=False.")
+        print("You can also try increasing --duplicate_tolerance if molecules are similar but not identical.")
+    
+    return unique_atoms, unique_properties
+
+
+def _molecules_are_identical(pos1, atomic_nums1, pos2, atomic_nums2, tolerance):
+    """
+    Compare two molecules for exact identity within tolerance.
+    
+    Parameters
+    ----------
+    pos1, pos2 : torch.Tensor
+        Centered positions of the two molecules
+    atomic_nums1, atomic_nums2 : torch.Tensor
+        Atomic numbers of the two molecules  
+    tolerance : float
+        Position tolerance for comparison
+        
+    Returns
+    -------
+    bool
+        True if molecules are identical within tolerance
+    """
+    # Quick checks first
+    if len(pos1) != len(pos2):
+        return False
+        
+    if len(atomic_nums1) != len(atomic_nums2):
+        return False
+        
+    if len(pos1) == 0:
+        return True  # Both empty
+        
+    # Check if atomic numbers match exactly
+    if not torch.allclose(atomic_nums1, atomic_nums2):
+        return False
+    
+    # Check positions within tolerance
+    if not torch.allclose(pos1, pos2, atol=tolerance):
+        return False
+        
+    return True
 
 
 def _generate_debug_outputs(atoms_list, properties_list, all_species, csv_path=None, xyz_path=None, remove_h=False):
