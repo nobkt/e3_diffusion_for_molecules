@@ -129,6 +129,10 @@ parser.add_argument('--normalization_factor', type=float, default=100,
                     help="Normalize the sum aggregation of EGNN. Higher values (e.g., 100) provide better numerical stability.")
 parser.add_argument('--aggregation_method', type=str, default='sum',
                     help='"sum" or "mean"')
+parser.add_argument('--export_conditions_csv', type=str, default=None,
+                    help='Export generation conditions (molecular_weight, pi_conjugation_ratio, '
+                         'atom_types_encoding, functional_groups_encoding) to CSV files and exit. '
+                         'Specify output directory path.')
 args = parser.parse_args()
 
 # For ASE databases, atomic charges are not included in the database
@@ -208,6 +212,28 @@ wandb.save('*.txt')
 
 # Retrieve QM9 dataloaders
 dataloaders, charge_scale = dataset.retrieve_dataloaders(args)
+
+# Check if CSV export mode is enabled
+if args.export_conditions_csv is not None:
+    print("\n" + "="*60)
+    print("CSV Export Mode Enabled")
+    print("="*60)
+    
+    # Get datasets from dataloaders
+    datasets = {}
+    for split_name, dataloader in dataloaders.items():
+        datasets[split_name] = dataloader.dataset
+    
+    # Export generation conditions to CSV
+    from qm9.dataset import export_generation_conditions_to_csv
+    export_generation_conditions_to_csv(
+        datasets=datasets,
+        output_dir=args.export_conditions_csv,
+        dataset_info=dataset_info
+    )
+    
+    print("\nCSV export completed. Exiting program.")
+    exit(0)
 
 data_dummy = next(iter(dataloaders['train']))
 
