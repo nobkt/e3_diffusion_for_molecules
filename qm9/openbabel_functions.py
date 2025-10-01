@@ -427,7 +427,9 @@ def extract_functional_groups_openbabel(mol):
         # Search for each functional group pattern
         for group_name, smarts_pattern in functional_group_patterns.items():
             try:
-                matches = pybel_mol.OBMol.HasSubstructMatch(pybel.readstring("smt", smarts_pattern).OBMol)
+                smarts = ob.OBSmartsPattern()
+                smarts.Init(smarts_pattern)
+                matches = smarts.Match(pybel_mol.OBMol)
                 if matches:
                     functional_groups.append(group_name)
             except:
