@@ -701,7 +701,23 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=F
         
         # Extract molecular descriptors using ASE and OpenBabel
         try:
-            descriptors = extract_molecular_descriptors_ase_openbabel(atoms)
+            # If remove_h is True, create a copy of atoms with H removed for descriptor extraction
+            # to ensure consistency with atomic_numbers tensor
+            if remove_h:
+                # Create a copy of atoms with hydrogen removed
+                atoms_for_extraction = atoms.copy()
+                # Get indices of non-hydrogen atoms
+                non_h_indices = [idx for idx, symbol in enumerate(atoms.get_chemical_symbols()) if symbol != 'H']
+                # Create new atoms object with only non-hydrogen atoms
+                if len(non_h_indices) > 0:
+                    atoms_for_extraction = atoms[non_h_indices]
+                else:
+                    # If all atoms are hydrogen, keep original (shouldn't happen with remove_h)
+                    atoms_for_extraction = atoms
+            else:
+                atoms_for_extraction = atoms
+            
+            descriptors = extract_molecular_descriptors_ase_openbabel(atoms_for_extraction)
             
             # Store molecular weight and π conjugation ratio
             property_tensors['molecular_weight'][i] = descriptors['molecular_weight']
@@ -991,15 +1007,23 @@ def export_generation_conditions_to_csv(datasets, output_dir='.', dataset_info=N
         atoms_array = charges_or_atomic_nums[:num_atoms_val].cpu().numpy()
         atom_counts = Counter()
         
+        # Create atomic number to symbol mapping for direct conversion
+        atomic_num_to_symbol = {
+            1: 'H', 2: 'He', 3: 'Li', 4: 'Be', 5: 'B', 6: 'C', 7: 'N', 8: 'O', 9: 'F', 10: 'Ne',
+            11: 'Na', 12: 'Mg', 13: 'Al', 14: 'Si', 15: 'P', 16: 'S', 17: 'Cl', 18: 'Ar',
+            19: 'K', 20: 'Ca', 21: 'Sc', 22: 'Ti', 23: 'V', 24: 'Cr', 25: 'Mn', 26: 'Fe', 27: 'Co', 28: 'Ni',
+            29: 'Cu', 30: 'Zn', 31: 'Ga', 32: 'Ge', 33: 'As', 34: 'Se', 35: 'Br', 36: 'Kr',
+            37: 'Rb', 38: 'Sr', 39: 'Y', 40: 'Zr', 41: 'Nb', 42: 'Mo', 43: 'Tc', 44: 'Ru', 45: 'Rh', 46: 'Pd',
+            47: 'Ag', 48: 'Cd', 49: 'In', 50: 'Sn', 51: 'Sb', 52: 'Te', 53: 'I', 54: 'Xe',
+            55: 'Cs', 56: 'Ba', 57: 'La', 72: 'Hf', 73: 'Ta', 74: 'W', 75: 'Re', 76: 'Os', 77: 'Ir', 78: 'Pt',
+            79: 'Au', 80: 'Hg', 81: 'Tl', 82: 'Pb', 83: 'Bi', 84: 'Po', 85: 'At', 86: 'Rn'
+        }
+        
         for atom_val in atoms_array:
             atom_val = int(atom_val)
             if atom_val > 0:
-                # Try to get symbol from decoder
-                if atom_val < len(atom_decoder):
-                    atom_symbol = atom_decoder[atom_val]
-                else:
-                    # Fallback to atomic number notation
-                    atom_symbol = f"Z{atom_val}"
+                # Convert atomic number directly to symbol
+                atom_symbol = atomic_num_to_symbol.get(atom_val, f"Z{atom_val}")
                 atom_counts[atom_symbol] += 1
         
         # Create formula string (e.g., C6H12O6)
