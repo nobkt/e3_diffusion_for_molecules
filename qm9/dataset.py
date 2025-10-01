@@ -906,4 +906,235 @@ def filter_atoms(datasets, n_nodes):
 
         datasets[key].num_pts = dataset.data['one_hot'].size(0)
         datasets[key].perm = None
+
+
+def export_generation_conditions_to_csv(datasets, output_dir='.', dataset_info=None):
+    """
+    Export generation conditions (molecular_weight, pi_conjugation_ratio, 
+    atom_types_encoding, functional_groups_encoding) to CSV files.
+    
+    Creates one CSV file per condition type containing data for all molecules.
+    
+    Parameters
+    ----------
+    datasets : dict
+        Dictionary with 'train', 'valid', 'test' keys containing dataset splits
+    output_dir : str
+        Directory to save the CSV files
+    dataset_info : dict, optional
+        Dataset information containing atom_decoder for composition strings
+    """
+    import csv
+    import os
+    from collections import Counter
+    
+    os.makedirs(output_dir, exist_ok=True)
+    
+    print(f"\n{'='*60}")
+    print("Exporting generation conditions to CSV files...")
+    print(f"Output directory: {output_dir}")
+    print(f"{'='*60}\n")
+    
+    # Combine all splits to export all molecules
+    all_data = {}
+    split_info = []
+    
+    for split_name, dataset in datasets.items():
+        n_molecules = len(dataset)
+        split_info.append((split_name, n_molecules))
+        
+        for key, values in dataset.data.items():
+            if key not in all_data:
+                all_data[key] = []
+            all_data[key].append(values)
+    
+    # Concatenate tensors from all splits
+    combined_data = {}
+    for key, values_list in all_data.items():
+        if len(values_list) > 0:
+            if isinstance(values_list[0], torch.Tensor):
+                # Only concatenate non-empty tensors
+                non_empty = [v for v in values_list if v.numel() > 0]
+                if non_empty:
+                    combined_data[key] = torch.cat(non_empty, dim=0)
+                else:
+                    combined_data[key] = values_list[0]  # Keep empty tensor
+            elif isinstance(values_list[0], (list, tuple)):
+                # For list/tuple metadata like mappings
+                combined_data[key] = values_list[0]
+            else:
+                # For other metadata, just keep the first value
+                combined_data[key] = values_list[0]
+    
+    n_total = len(combined_data['num_atoms'])
+    print(f"Total molecules to export: {n_total}")
+    for split_name, n_molecules in split_info:
+        print(f"  {split_name}: {n_molecules}")
+    print()
+    
+    # Get atom decoder for composition strings
+    if dataset_info and 'atom_decoder' in dataset_info:
+        atom_decoder = dataset_info['atom_decoder']
+    else:
+        # Default QM9 decoder
+        atom_decoder = ['H', 'C', 'N', 'O', 'F']
+    
+    # Helper function to get molecular composition string
+    def get_composition_string(charges_or_atomic_nums, num_atoms_val):
+        """Generate molecular formula from atomic charges or atomic numbers."""
+        if charges_or_atomic_nums is None:
+            return "Unknown"
+        
+        atoms_array = charges_or_atomic_nums[:num_atoms_val].cpu().numpy()
+        atom_counts = Counter()
+        
+        for atom_val in atoms_array:
+            atom_val = int(atom_val)
+            if atom_val > 0:
+                # Try to get symbol from decoder
+                if atom_val < len(atom_decoder):
+                    atom_symbol = atom_decoder[atom_val]
+                else:
+                    # Fallback to atomic number notation
+                    atom_symbol = f"Z{atom_val}"
+                atom_counts[atom_symbol] += 1
+        
+        # Create formula string (e.g., C6H12O6)
+        formula = ""
+        for atom in sorted(atom_counts.keys()):
+            count = atom_counts[atom]
+            formula += f"{atom}{count if count > 1 else ''}"
+        
+        return formula if formula else "Unknown"
+    
+    # Get references to charges or atomic_numbers for composition
+    charges_or_atomic = combined_data.get('charges')
+    if charges_or_atomic is None or charges_or_atomic.numel() == 0:
+        charges_or_atomic = combined_data.get('atomic_numbers')
+    
+    # Get atom types and functional groups mappings if available
+    atom_types_mapping = combined_data.get('_atom_types_mapping', [])
+    functional_groups_mapping = combined_data.get('_functional_groups_mapping', [])
+    
+    num_atoms = combined_data['num_atoms']
+    
+    # 1. Export molecular_weight.csv
+    print("Generating molecular_weight.csv...")
+    csv_path = os.path.join(output_dir, 'molecular_weight.csv')
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(['ID', '分子の組成', '分子量'])
+        
+        if 'molecular_weight' in combined_data:
+            molecular_weights = combined_data['molecular_weight']
+            
+            for i in range(n_total):
+                mol_id = i
+                composition = get_composition_string(charges_or_atomic[i] if charges_or_atomic is not None else None, 
+                                                    num_atoms[i].item())
+                mol_weight = molecular_weights[i].item()
+                writer.writerow([mol_id, composition, f"{mol_weight:.4f}"])
+            
+            print(f"  ✓ Exported {n_total} molecules to {csv_path}")
+        else:
+            print(f"  ✗ molecular_weight not found in dataset")
+            print(f"     Available keys: {list(combined_data.keys())[:10]}...")
+    
+    # 2. Export pi_conjugation_ratio.csv
+    print("Generating pi_conjugation_ratio.csv...")
+    csv_path = os.path.join(output_dir, 'pi_conjugation_ratio.csv')
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(['ID', '分子の組成', 'π共役比率'])
+        
+        if 'pi_conjugation_ratio' in combined_data:
+            pi_conjugation_ratios = combined_data['pi_conjugation_ratio']
+            
+            for i in range(n_total):
+                mol_id = i
+                composition = get_composition_string(charges_or_atomic[i] if charges_or_atomic is not None else None,
+                                                    num_atoms[i].item())
+                pi_ratio = pi_conjugation_ratios[i].item()
+                writer.writerow([mol_id, composition, f"{pi_ratio:.4f}"])
+            
+            print(f"  ✓ Exported {n_total} molecules to {csv_path}")
+        else:
+            print(f"  ✗ pi_conjugation_ratio not found in dataset")
+    
+    # 3. Export atom_types_encoding.csv
+    print("Generating atom_types_encoding.csv...")
+    csv_path = os.path.join(output_dir, 'atom_types_encoding.csv')
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        
+        if 'atom_types_encoding' in combined_data:
+            atom_types_encoding = combined_data['atom_types_encoding']
+            
+            # Create header with atom type names
+            header = ['ID', '分子の組成']
+            if len(atom_types_mapping) > 0:
+                header.extend(atom_types_mapping)
+            else:
+                # Fallback: use indices
+                n_atom_types = atom_types_encoding.shape[1] if len(atom_types_encoding.shape) > 1 else 1
+                header.extend([f'AtomType_{j}' for j in range(n_atom_types)])
+            writer.writerow(header)
+            
+            for i in range(n_total):
+                mol_id = i
+                composition = get_composition_string(charges_or_atomic[i] if charges_or_atomic is not None else None,
+                                                    num_atoms[i].item())
+                
+                # Get encoding values
+                if len(atom_types_encoding.shape) > 1:
+                    encoding_values = [f"{val:.0f}" for val in atom_types_encoding[i].tolist()]
+                else:
+                    encoding_values = [f"{atom_types_encoding[i].item():.0f}"]
+                
+                writer.writerow([mol_id, composition] + encoding_values)
+            
+            print(f"  ✓ Exported {n_total} molecules to {csv_path}")
+        else:
+            print(f"  ✗ atom_types_encoding not found in dataset")
+    
+    # 4. Export functional_groups_encoding.csv
+    print("Generating functional_groups_encoding.csv...")
+    csv_path = os.path.join(output_dir, 'functional_groups_encoding.csv')
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        
+        if 'functional_groups_encoding' in combined_data:
+            functional_groups_encoding = combined_data['functional_groups_encoding']
+            
+            # Create header with functional group names
+            header = ['ID', '分子の組成']
+            if len(functional_groups_mapping) > 0:
+                header.extend(functional_groups_mapping)
+            else:
+                # Fallback: use indices
+                n_functional_groups = functional_groups_encoding.shape[1] if len(functional_groups_encoding.shape) > 1 else 1
+                header.extend([f'FunctionalGroup_{j}' for j in range(n_functional_groups)])
+            writer.writerow(header)
+            
+            for i in range(n_total):
+                mol_id = i
+                composition = get_composition_string(charges_or_atomic[i] if charges_or_atomic is not None else None,
+                                                    num_atoms[i].item())
+                
+                # Get encoding values
+                if len(functional_groups_encoding.shape) > 1:
+                    encoding_values = [f"{val:.0f}" for val in functional_groups_encoding[i].tolist()]
+                else:
+                    encoding_values = [f"{functional_groups_encoding[i].item():.0f}"]
+                
+                writer.writerow([mol_id, composition] + encoding_values)
+            
+            print(f"  ✓ Exported {n_total} molecules to {csv_path}")
+        else:
+            print(f"  ✗ functional_groups_encoding not found in dataset")
+    
+    print(f"\n{'='*60}")
+    print("CSV export completed successfully!")
+    print(f"Files saved in: {output_dir}")
+    print(f"{'='*60}\n")
     return datasets
