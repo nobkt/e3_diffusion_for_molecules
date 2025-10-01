@@ -725,7 +725,11 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=F
     
     # Create encodings for categorical features
     atom_types_sorted = sorted(list(all_atom_types))
-    functional_groups_sorted = sorted(list(all_functional_groups))
+    
+    # For functional groups, use ALL patterns from the definition, not just detected ones
+    # This ensures consistent dimensionality across different datasets
+    from qm9.openbabel_functions import get_functional_group_patterns
+    functional_groups_sorted = get_functional_group_patterns()
     
     # Create individual scalar features for each atom type and functional group
     # This is more compatible with the existing conditioning framework
@@ -740,13 +744,12 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=F
                     property_tensors[feature_name][i] = 1.0
     
     # For functional groups - create one feature per functional group  
-    if functional_groups_sorted:
-        for fg in functional_groups_sorted:
-            feature_name = f'has_{fg}'
-            property_tensors[feature_name] = torch.zeros(n_molecules, dtype=torch.float32)
-            for i, mol_functional_groups in enumerate(functional_groups_list):
-                if fg in mol_functional_groups:
-                    property_tensors[feature_name][i] = 1.0
+    for fg in functional_groups_sorted:
+        feature_name = f'has_{fg}'
+        property_tensors[feature_name] = torch.zeros(n_molecules, dtype=torch.float32)
+        for i, mol_functional_groups in enumerate(functional_groups_list):
+            if fg in mol_functional_groups:
+                property_tensors[feature_name][i] = 1.0
     
     # Also keep the original multi-dimensional encodings for backward compatibility
     # but mark them as special by adding them to dataset_data directly
@@ -758,13 +761,13 @@ def convert_ase_to_dataset_format(atoms_list, properties_list, include_charges=F
                     idx = atom_types_sorted.index(atom_type)
                     atom_types_encoding[i, idx] = 1.0
     
-    functional_groups_encoding = torch.zeros(n_molecules, max(len(functional_groups_sorted), 1), dtype=torch.float32)
-    if functional_groups_sorted:
-        for i, mol_functional_groups in enumerate(functional_groups_list):
-            for fg in mol_functional_groups:
-                if fg in functional_groups_sorted:
-                    idx = functional_groups_sorted.index(fg)
-                    functional_groups_encoding[i, idx] = 1.0
+    # Create encoding for ALL functional groups (not just detected ones)
+    functional_groups_encoding = torch.zeros(n_molecules, len(functional_groups_sorted), dtype=torch.float32)
+    for i, mol_functional_groups in enumerate(functional_groups_list):
+        for fg in mol_functional_groups:
+            if fg in functional_groups_sorted:
+                idx = functional_groups_sorted.index(fg)
+                functional_groups_encoding[i, idx] = 1.0
 
     dataset_data = {
         'positions': positions,

@@ -20,6 +20,34 @@ import pickle
 import os
 
 
+def get_functional_group_patterns():
+    """
+    Get the list of all functional group patterns in a consistent order.
+    
+    Returns
+    -------
+    list
+        Ordered list of functional group names
+    """
+    # Keep the same order as defined in extract_functional_groups_openbabel
+    return [
+        'hydroxyl',
+        'carbonyl',
+        'carboxyl',
+        'aldehyde',
+        'ketone',
+        'amino',
+        'nitro',
+        'chloro',
+        'bromo',
+        'fluoro',
+        'iodo',
+        'methyl',
+        'methoxy',
+        'phenyl',
+    ]
+
+
 def compute_qm9_smiles_openbabel(dataset_name, remove_h):
     '''
     OpenBabel version of compute_qm9_smiles from rdkit_functions.py
