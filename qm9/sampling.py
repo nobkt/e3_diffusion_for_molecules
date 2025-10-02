@@ -214,7 +214,16 @@ def sample_sweep_conditional(args, device, generative_model, dataset_info, prop_
     for key in args.conditioning:
         if prop_dist is not None and key in prop_dist.distributions:
             # Scalar property with distribution - create sweep
-            min_val, max_val = prop_dist.distributions[key][n_nodes]['params']
+            # Handle missing node counts by finding the nearest available node count
+            if n_nodes not in prop_dist.distributions[key]:
+                available_nodes = list(prop_dist.distributions[key].keys())
+                if len(available_nodes) == 0:
+                    raise ValueError(f"No distributions available for property {key}")
+                n_nodes_actual = min(available_nodes, key=lambda x: abs(x - n_nodes))
+            else:
+                n_nodes_actual = n_nodes
+            
+            min_val, max_val = prop_dist.distributions[key][n_nodes_actual]['params']
             mean, mad = prop_dist.normalizer[key]['mean'], prop_dist.normalizer[key]['mad']
             min_val = (min_val - mean) / (mad)
             max_val = (max_val - mean) / (mad)
