@@ -161,6 +161,8 @@ class DistributionProperty:
         vals = []
         for prop in self.properties:
             # Handle missing node counts by finding the nearest available node count
+            # This can happen when the node distribution includes counts that don't have
+            # any training samples with the required properties
             if n_nodes not in self.distributions[prop]:
                 # Find the nearest node count that exists in the distribution
                 available_nodes = list(self.distributions[prop].keys())
