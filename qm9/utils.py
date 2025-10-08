@@ -74,6 +74,12 @@ def prepare_context(conditioning, minibatch, property_norms):
     node_mask = minibatch['atom_mask'].unsqueeze(2)
     context_node_nf = 0
     context_list = []
+    
+    # Define which features are always global (molecular-level) features
+    # These should be broadcast to all nodes regardless of their dimensions
+    global_features = {'atom_types_encoding', 'functional_groups_encoding', 
+                      'molecular_weight', 'pi_conjugation_ratio'}
+    
     for key in conditioning:
         properties = minibatch[key]
         
@@ -93,14 +99,20 @@ def prepare_context(conditioning, minibatch, property_norms):
                 properties = (properties - mean) / mad
         
         if len(properties.size()) == 1:
-            # Global feature.
+            # Global feature (scalar per molecule)
             assert properties.size() == (batch_size,)
             reshaped = properties.view(batch_size, 1, 1).repeat(1, n_nodes, 1)
             context_list.append(reshaped)
             context_node_nf += 1
         elif len(properties.size()) == 2:
-            # Could be node feature or global feature
-            if properties.size(1) == n_nodes:
+            # Check if this is a known global feature or if dimensions suggest it's global
+            if key in global_features:
+                # Global feature with shape (batch_size, n_features) - always broadcast to all nodes
+                n_features = properties.size(1)
+                reshaped = properties.view(batch_size, 1, n_features).repeat(1, n_nodes, 1)
+                context_list.append(reshaped)
+                context_node_nf += n_features
+            elif properties.size(1) == n_nodes:
                 # Node feature with shape (batch_size, n_nodes)
                 context_key = properties.unsqueeze(2)
                 context_list.append(context_key)
