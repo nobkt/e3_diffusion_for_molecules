@@ -81,7 +81,13 @@ def prepare_context(conditioning, minibatch, property_norms):
                       'molecular_weight', 'pi_conjugation_ratio'}
     
     for key in conditioning:
+        if key not in minibatch:
+            raise ValueError(f"Conditioning key '{key}' not found in minibatch. Available keys: {list(minibatch.keys())}")
+        
         properties = minibatch[key]
+        
+        if key not in property_norms:
+            raise ValueError(f"Conditioning key '{key}' not found in property_norms. Available keys: {list(property_norms.keys())}")
         
         # Handle normalization for both scalar and multi-dimensional features
         mean = property_norms[key]['mean']
@@ -131,9 +137,20 @@ def prepare_context(conditioning, minibatch, property_norms):
         else:
             raise ValueError('Invalid tensor size, more than 3 axes.')
     # Concatenate
+    if len(context_list) == 0:
+        raise ValueError("No conditioning features were added to context. Check that conditioning keys exist in minibatch.")
+    
     context = torch.cat(context_list, dim=2)
     # Mask disabled nodes!
     context = context * node_mask
-    assert context.size(2) == context_node_nf
+    
+    # Verify the final context shape
+    if context.size(0) != batch_size:
+        raise ValueError(f"Context batch size mismatch: expected {batch_size}, got {context.size(0)}")
+    if context.size(1) != n_nodes:
+        raise ValueError(f"Context n_nodes mismatch: expected {n_nodes}, got {context.size(1)}")
+    if context.size(2) != context_node_nf:
+        raise ValueError(f"Context features mismatch: expected {context_node_nf}, got {context.size(2)}")
+    
     return context
 
