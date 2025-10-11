@@ -11,6 +11,11 @@ from .periodic_utils import (
     build_periodic_neighbor_list,
     wrap_to_unit_cell,
 )
+from .molecular_crystal_loader import (
+    MolecularCrystalDataset,
+    collate_molecular_crystal_batch,
+    load_paired_datasets,
+)
 
 __all__ = [
     'minimum_image_distance',
@@ -20,4 +25,7 @@ __all__ = [
     'cell_vectors_to_params',
     'build_periodic_neighbor_list',
     'wrap_to_unit_cell',
+    'MolecularCrystalDataset',
+    'collate_molecular_crystal_batch',
+    'load_paired_datasets',
 ]

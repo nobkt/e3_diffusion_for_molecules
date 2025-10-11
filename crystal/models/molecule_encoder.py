@@ -165,7 +165,9 @@ class MoleculeEncoder(nn.Module):
             num_atoms = node_mask.sum(dim=1, keepdim=True)
             mean_pool = h_masked.sum(dim=1) / (num_atoms + 1e-8)
             
-            h_masked_max = h_masked + (1 - node_mask.unsqueeze(-1)) * (-1e9)
+            # Convert boolean mask to float for arithmetic
+            mask_float = node_mask.float().unsqueeze(-1)
+            h_masked_max = h_masked + (1 - mask_float) * (-1e9)
             max_pool = h_masked_max.max(dim=1)[0]
             
             aggregated = torch.cat([mean_pool, max_pool], dim=-1)
