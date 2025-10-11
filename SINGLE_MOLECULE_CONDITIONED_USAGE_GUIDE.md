@@ -56,9 +56,20 @@ benzene = Atoms(
 )
 
 # データベースに保存
+# 注意: smiles と formula はオプション（人間の可読性のため）
+# モデルの訓練・生成には原子座標と原子番号のみが使用されます
 mol_id = mol_db.write(benzene, smiles='c1ccccc1', formula='C6H6')
 print(f"Molecule ID: {mol_id}")
+
+# または、smilesとformulaなしでも保存可能（完全に動作します）
+# mol_id = mol_db.write(benzene)
 ```
+
+> **📝 重要な注意事項 / Important Note:**
+> 
+> **日本語:** `smiles` と `formula` はオプションのメタデータです。モデルの訓練と生成に使用されるのは、原子の3D座標と原子番号のみです。RDKitを使用せず、OpenBabelなどの代替ツールで分子を扱う場合でも、SMILESなしでデータベースを作成できます。詳細は [DATASET_REQUIREMENTS_FAQ.md](./DATASET_REQUIREMENTS_FAQ.md) を参照してください。
+> 
+> **English:** `smiles` and `formula` are optional metadata. Only 3D atomic coordinates and atomic numbers are used for model training and generation. You can create databases without SMILES even when using alternative tools like OpenBabel instead of RDKit. See [DATASET_REQUIREMENTS_FAQ.md](./DATASET_REQUIREMENTS_FAQ.md) for details.
 
 #### 2.2 結晶データベースの作成
 
@@ -197,6 +208,56 @@ for i, crystal in enumerate(generated_crystals):
     crystal.write(f'outputs/generated/crystal_{i}.cif')
     crystal.write(f'outputs/generated/crystal_{i}.xyz')  # supercell展開版
 ```
+
+---
+
+## ❓ よくある質問 (Frequently Asked Questions)
+
+### Q1: SMILESとformulaの情報は必須ですか？
+
+**A: いいえ、必須ではありません。**
+
+- モデルの訓練と生成には、原子の3D座標と原子番号のみが使用されます
+- `smiles` と `formula` はオプションのメタデータで、人間がデータを理解しやすくするための補助情報です
+- RDKitを使わずOpenBabelなどで分子を扱う場合でも、SMILESなしでデータベースを作成できます
+- 詳細は [DATASET_REQUIREMENTS_FAQ.md](./DATASET_REQUIREMENTS_FAQ.md) を参照してください
+
+### Q2: ASEデータベースに最低限必要な情報は？
+
+**A: 以下の情報のみが必須です：**
+
+**分子データベース:**
+- 原子のシンボルまたは原子番号
+- 原子の3D座標
+
+**結晶データベース:**
+- 原子のシンボルまたは原子番号
+- 原子の3D座標
+- セル情報（cell vectors, PBC）
+- `molecule_id`（対応する分子のID）
+
+**推奨メタデータ:** `Z`, `space_group`, `density`
+
+### Q3: OpenBabelで分子を準備できますか？
+
+**A: はい、完全に可能です。**
+
+システムは3D座標と原子番号のみから動作するため、OpenBabelで分子を準備し、ASE Atomsオブジェクトに変換してデータベースに保存できます。RDKitやSMILESは不要です。
+
+### Q4: データベースにカスタムメタデータを追加できますか？
+
+**A: はい、ASEデータベースの任意のkey-valueペアを保存できます。**
+
+```python
+mol_id = mol_db.write(
+    molecule,
+    my_custom_field='value',
+    energy=-123.45,
+    source='my_calculation'
+)
+```
+
+ただし、モデルが使用するのは3D構造情報のみで、カスタムメタデータは訓練には使用されません。
 
 ---
 
@@ -421,6 +482,7 @@ optimized_crystal = optimize_structure(generated_crystal)
 ## 📚 参考資料 (References)
 
 ### ドキュメント
+- [データセット要件FAQ](./DATASET_REQUIREMENTS_FAQ.md) - SMILESとformulaは必須？
 - [理論説明書](./SINGLE_MOLECULE_CONDITIONED_CRYSTAL_THEORY.md) - 数式付き詳細理論
 - [仕様書](./SINGLE_MOLECULE_CONDITIONED_CRYSTAL_SPEC.md) - システム仕様
 - [既存の結晶生成ドキュメント](./MOLECULAR_CRYSTAL_SPECIFICATION.md)
