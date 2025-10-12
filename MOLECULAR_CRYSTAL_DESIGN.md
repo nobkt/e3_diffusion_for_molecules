@@ -26,6 +26,9 @@ e3_diffusion_for_molecules/
 │   ├── data/                               # データ処理
 │   │   ├── __init__.py
 │   │   ├── crystal_loader.py               # 結晶データローダー
+│   │   ├── molecule_loader.py              # [新規] 単分子データローダー
+│   │   ├── molecular_features.py           # [新規] 分子特徴量抽出
+│   │   ├── molecule_crystal_pair.py        # [新規] 分子-結晶ペアリング
 │   │   ├── periodic_utils.py               # 周期境界条件ユーティリティ
 │   │   ├── coordinate_transform.py         # 座標変換（分数↔デカルト）
 │   │   └── symmetry_handler.py             # 空間群・対称性処理
@@ -33,11 +36,13 @@ e3_diffusion_for_molecules/
 │   ├── models/                             # モデル拡張
 │   │   ├── __init__.py
 │   │   ├── periodic_egnn.py                # 周期的EGNN
+│   │   ├── molecular_feature_encoder.py    # [新規] 分子特徴量エンコーダー
 │   │   ├── lattice_diffusion.py            # 格子パラメータ拡散
 │   │   └── crystal_dynamics.py             # 結晶構造拡散統合モデル
 │   │
 │   ├── conditioning/                        # 条件付けモジュール
 │   │   ├── __init__.py
+│   │   ├── molecular_conditioning.py        # [新規] 分子特徴量条件付け
 │   │   ├── space_group_embedding.py        # 空間群埋め込み
 │   │   ├── density_conditioning.py         # 密度条件付け
 │   │   └── lattice_conditioning.py         # 格子パラメータ条件付け
@@ -45,6 +50,7 @@ e3_diffusion_for_molecules/
 │   ├── evaluation/                         # 評価モジュール
 │   │   ├── __init__.py
 │   │   ├── crystal_metrics.py              # 結晶評価指標
+│   │   ├── polymorph_analyzer.py           # [新規] 結晶多形分析
 │   │   ├── structure_validator.py          # 構造妥当性検証
 │   │   └── symmetry_analyzer.py            # 対称性分析
 │   │
@@ -68,6 +74,7 @@ e3_diffusion_for_molecules/
 │
 └── tests/                                  # テスト
     ├── test_crystal_loader.py              # [新規] データローダーテスト
+    ├── test_molecular_features.py          # [新規] 分子特徴量テスト
     ├── test_periodic_utils.py              # [新規] 周期性テスト
     ├── test_periodic_egnn.py               # [新規] モデルテスト
     └── test_crystal_integration.py         # [新規] 統合テスト
