@@ -90,7 +90,12 @@ This documentation package provides comprehensive specifications and design for 
 
 #### 主要セクション:
 1. **ディレクトリ構造**: 完全なファイル配置
-   - **新規モジュール**: molecular_features.py, molecule_crystal_pair.py など
+   - **新規モジュール**: 
+     - molecular_features.py (分子特徴量抽出)
+     - molecule_crystal_pair.py (分子-結晶ペアリング)
+     - molecular_feature_encoder.py (モデル統合)
+     - molecular_conditioning.py (条件付け)
+     - polymorph_analyzer.py (多形分析)
 2. **データ処理層の設計**:
    - `crystal/data/crystal_loader.py` (完全実装)
    - `crystal/data/molecular_features.py` (新規・完全実装)
@@ -134,7 +139,7 @@ This documentation package provides comprehensive specifications and design for 
 
 **対象**: 開発者、研究者  
 **所要時間**: 2-3時間  
-**サイズ**: 650行、14KB  
+**サイズ**: 703行、14KB  
 **特徴**: **理論的に正確で、ヒューリスティックフリーな実装を保証**
 
 ---
