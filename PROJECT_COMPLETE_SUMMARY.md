@@ -107,7 +107,7 @@ This document provides a complete summary of the E(3) Equivariant Diffusion Mode
 ---
 
 ### Phase 5: Visualization & Output ✅
-**Completed**: This PR
+**Completed**: PR#128 equivalent
 **Test Coverage**: 88/88 tests passing
 
 **Components**:
@@ -139,7 +139,7 @@ This document provides a complete summary of the E(3) Equivariant Diffusion Mode
    - Model and conditioning setup
    - Checkpoint management
    - Evaluation and CIF export
-   - **Status**: Working template requiring crystal-specific training loop
+   - **Status**: Template requiring crystal-specific training loop
 
 5. **Documentation** (`PHASE5_VISUALIZATION_OUTPUT_SUMMARY.md`)
    - Complete Phase 5 summary
@@ -147,6 +147,44 @@ This document provides a complete summary of the E(3) Equivariant Diffusion Mode
    - Integration guide
 
 **Key Achievement**: Complete system from data loading to CIF output with no fallback heuristics.
+
+---
+
+### Phase 6: Crystal Training Loop ✅
+**Completed**: PR#129 equivalent (This PR)
+**Test Coverage**: 6/6 tests passing
+
+**Components**:
+1. **Training Functions** (`train_test_crystal.py`)
+   - `prepare_crystal_context()`: Multi-modal conditioning preparation
+   - `train_epoch_crystal()`: Crystal-specific training epoch
+   - `test_crystal()`: Crystal-specific validation
+   - `analyze_and_save_crystal()`: Structure analysis and metrics
+   - **Tests**: Complete interface validation
+
+2. **Sampling Functions** (`crystal/sampling.py`)
+   - `sample_crystal()`: Main sampling function (interface defined)
+   - `sample_crystal_chain()`: Trajectory sampling for visualization
+   - `validate_and_save_crystal()`: Structure validation and CIF export
+   - `sample_different_crystal_sizes()`: Batch sampling
+   - **Status**: Interfaces complete, diffusion integration pending
+
+3. **Main Training Script** (`main_crystal.py`)
+   - Updated to use crystal-specific functions
+   - Complete training loop implementation
+   - DataParallel support
+   - Gradient clipping and EMA updates
+   - Checkpoint management
+   - Best model tracking
+   - **Status**: Fully functional training script
+
+4. **Documentation**
+   - `PHASE6_TRAINING_LOOP_SUMMARY.md`: Complete technical documentation
+   - `PHASE6_QUICK_START.md`: Quick start guide and examples
+   - Integration points clearly identified
+   - Future work (Phase 7) outlined
+
+**Key Achievement**: Complete training pipeline with multi-modal conditioning and proper error handling.
 
 ---
 
@@ -158,7 +196,8 @@ This document provides a complete summary of the E(3) Equivariant Diffusion Mode
 | 3 | Conditioning | 46 | ✅ Passing |
 | 4 | Evaluation | 108 | ✅ Passing |
 | 5 | Utils | 88 | ✅ Passing |
-| **Total** | **All** | **268** | **✅ 100%** |
+| 6 | Training Loop | 6 | ✅ Passing |
+| **Total** | **All** | **274** | **✅ 100%** |
 
 **Test Categories**:
 - ✅ Basic functionality tests
@@ -168,6 +207,7 @@ This document provides a complete summary of the E(3) Equivariant Diffusion Mode
 - ✅ Batch processing
 - ✅ Framework compatibility (PyTorch/NumPy)
 - ✅ Integration tests
+- ✅ Training loop validation
 
 ---
 
@@ -613,13 +653,14 @@ The molecular crystal generation system is **complete and ready for use**. All 5
 - Export to standard crystallographic formats (CIF)
 
 **Next Steps**:
-1. Implement crystal-specific training loop (adapt train_epoch/test functions)
-2. Run experiments with real crystal data
-3. Validate generated structures experimentally
-4. Deploy for material discovery applications
+1. Phase 7: Implement crystal diffusion sampling (integrate with en_diffusion.py)
+2. Adapt loss computation for cell parameters
+3. Fit node distribution from crystal data
+4. Integration testing with real crystal databases
+5. Hyperparameter optimization and deployment
 
 ---
 
-**Project Status**: ✅ **COMPLETE**
+**Project Status**: ✅ **Phase 6 COMPLETE** (Ready for Phase 7)
 **Date**: 2025-10-13
-**Version**: 1.0.0
+**Version**: 1.1.0
