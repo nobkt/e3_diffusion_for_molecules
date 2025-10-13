@@ -383,15 +383,15 @@ class TestValidateStructure:
     def test_skip_distance_check(self, valid_crystal):
         """Test skipping distance check"""
         crystal = valid_crystal.copy()
-        # Add very close atoms
+        # Add very close atoms (0.1 Å apart in Cartesian)
         crystal['positions_cart'] = torch.tensor([
             [0.0, 0.0, 0.0],
             [0.1, 0.0, 0.0],
         ])
-        # Update fractional coordinates to match
+        # Update fractional coordinates to match (0.1 Å / 5.0 Å cell = 0.02)
         crystal['positions_frac'] = torch.tensor([
             [0.0, 0.0, 0.0],
-            [0.02, 0.0, 0.0],
+            [0.1 / 5.0, 0.0, 0.0],  # Explicit calculation for clarity
         ])
         
         validator = StructureValidator(strict_mode=False)

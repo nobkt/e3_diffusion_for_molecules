@@ -123,7 +123,7 @@ class TestDetectSpaceGroup:
                 assert any("not available" in str(warning.message) for warning in w)
     
     @pytest.mark.skipif(
-        not hasattr(SymmetryAnalyzer(), 'has_spglib') or not SymmetryAnalyzer().has_spglib,
+        not SymmetryAnalyzer().has_spglib,
         reason="spglib not available"
     )
     def test_detect_space_group_with_spglib(self, cubic_crystal):
