@@ -8,4 +8,16 @@ Modules:
 - crystal_dynamics: Integrated crystal dynamics model
 """
 
-__all__ = []
+from .molecular_encoder import MolecularEncoder, create_fully_connected_edges
+from .periodic_egnn import PeriodicEGNN, PeriodicEGNNLayer
+from .lattice_diffusion import LatticeDiffusion
+from .crystal_dynamics import CrystalDynamics
+
+__all__ = [
+    'MolecularEncoder',
+    'create_fully_connected_edges',
+    'PeriodicEGNN',
+    'PeriodicEGNNLayer',
+    'LatticeDiffusion',
+    'CrystalDynamics',
+]
