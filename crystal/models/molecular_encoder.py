@@ -59,13 +59,13 @@ class MolecularEncoder(nn.Module):
         # Molecular EGNN (reuse existing implementation)
         self.molecular_egnn = EGNN(
             in_node_nf=in_node_nf,
+            in_edge_nf=0,  # No edge features for molecules
             hidden_nf=hidden_nf,
             out_node_nf=hidden_nf,
-            in_edge_nf=0,  # No edge features for molecules
             n_layers=n_layers,
             attention=attention,
-            normalize=normalize,
             tanh=tanh,
+            norm_diff=normalize,
         )
         
         # Global pooling transformation
