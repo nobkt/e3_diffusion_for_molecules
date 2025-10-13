@@ -90,16 +90,20 @@ This documentation package provides comprehensive specifications and design for 
 
 #### 主要セクション:
 1. **ディレクトリ構造**: 完全なファイル配置
+   - **新規モジュール**: molecular_features.py, molecule_crystal_pair.py など
 2. **データ処理層の設計**:
    - `crystal/data/crystal_loader.py` (完全実装)
+   - `crystal/data/molecular_features.py` (新規・完全実装)
+   - `crystal/data/molecule_crystal_pair.py` (新規・完全実装)
    - `crystal/data/periodic_utils.py` (完全実装)
    - 全関数のコード例
 3. **モデル層の設計**:
    - `crystal/models/periodic_egnn.py` (完全実装)
+   - `crystal/models/molecular_feature_encoder.py` (新規)
    - `crystal/models/lattice_diffusion.py` (完全実装)
-   - `crystal/models/crystal_dynamics.py` (完全実装)
-4. **条件付けモジュール**: 空間群、密度、格子パラメータ
-5. **評価モジュール**: メトリクス、妥当性チェック
+   - `crystal/models/crystal_dynamics.py` (完全実装・分子特徴量統合)
+4. **条件付けモジュール**: 空間群、密度、格子パラメータ、**分子記述子**
+5. **評価モジュール**: メトリクス、妥当性チェック、**多形分析**
 6. **統合とインターフェース**: 既存コードとの統合
 7. **テスト戦略**: ユニットテストの例
 8. **実装ロードマップ**: 11週間の詳細計画
@@ -109,6 +113,29 @@ This documentation package provides comprehensive specifications and design for 
 **所要時間**: 実装全体で数週間、参照として継続的に使用  
 **サイズ**: 2,172行、72KB  
 **特徴**: **すぐに使える完全なPythonコード例を多数含む**
+
+---
+
+### 4.5 🧬 [MOLECULAR_FEATURES_EXTENSION.md](./MOLECULAR_FEATURES_EXTENSION.md) **NEW!**
+**分子特徴量統合 - ホモ結晶生成拡張**
+
+ホモ結晶生成のための分子特徴量統合を詳細に説明する新規ドキュメント。
+
+#### 主要内容:
+1. **設計原理**: 理論的根拠とヒューリスティックフリーなアプローチ
+2. **分子特徴量の詳細**: 幾何学的、形状記述子、電子的、グラフ表現
+3. **実装詳細**: MolecularFeatureExtractor, MoleculeCrystalDataset
+4. **モデルへの統合**: CrystalDynamics との統合
+5. **条件付けモジュール**: MolecularConditioning
+6. **評価と検証**: PolymorphAnalyzer
+7. **データセット準備ガイド**: molecules.db と crystals.db
+8. **使用例**: 基本的な使用方法と結晶多形の生成
+9. **理論的参考文献**: 物理・化学の標準的文献
+
+**対象**: 開発者、研究者  
+**所要時間**: 2-3時間  
+**サイズ**: 650行、14KB  
+**特徴**: **理論的に正確で、ヒューリスティックフリーな実装を保証**
 
 ---
 
