@@ -20,33 +20,50 @@ This specification defines the detailed requirements for extending the existing 
   - 分数座標または絶対座標での原子位置
   - 空間群情報（オプション）
   
-- **FR-1.2**: 複数の結晶構造をバッチ処理できる
+- **FR-1.2**: **ホモ結晶のための分子-結晶リンク構造**
+  - **単分子データセット**: 各分子のxyz座標情報
+  - **分子性結晶データセット**: 各結晶構造と対応する分子IDのリンク
+  - **分子-結晶マッピング**: 分子A → 結晶A（1対多、結晶多形を考慮）
+  - **分子特徴量の自動抽出**: xyz座標から分子記述子を計算
+  
+- **FR-1.3**: 複数の結晶構造をバッチ処理できる
   - 異なるサイズの単位格子に対応
   - 異なる空間群の混在に対応
+  - 同一分子の異なる結晶多形を区別
   
-- **FR-1.3**: 結晶構造の前処理
+- **FR-1.4**: 結晶構造の前処理
   - 単位格子の正規化
   - 非対称単位の抽出（オプション）
   - 原子座標の周期境界条件の適用
+  - 分子特徴量の正規化
 
 #### FR-2: モデル学習 (Model Training)
 - **FR-2.1**: 周期境界条件を考慮した距離計算
   - 最小イメージ規約（Minimum Image Convention）の実装
   - 周期境界を越えた近傍原子の検出
   
-- **FR-2.2**: 格子パラメータの学習
+- **FR-2.2**: **分子特徴量の統合**
+  - 単分子のxyz座標から幾何学的記述子を抽出
+  - 分子の形状、サイズ、電荷分布などの特徴量
+  - 分子特徴量を結晶生成の条件付けに使用
+  - 分子間相互作用の考慮
+  
+- **FR-2.3**: 格子パラメータの学習
   - 単位格子の形状（a, b, c, α, β, γ）の同時生成
   - 格子パラメータの物理的制約の適用
+  - 分子サイズに適した格子パラメータの生成
   
-- **FR-2.3**: E(3)等変性の拡張
+- **FR-2.4**: E(3)等変性の拡張
   - 周期性を保持した等変変換
   - 格子変換に対する共変性
+  - 分子回転・並進に対する等変性
   
-- **FR-2.4**: 条件付き生成
+- **FR-2.5**: **ホモ結晶のための条件付き生成**
+  - **分子記述子での条件付け**: 分子構造から自動抽出された特徴量
   - 空間群での条件付け
   - 密度での条件付け
   - 格子定数での条件付け
-  - 分子特性での条件付け
+  - **結晶多形の区別**: 同一分子の異なる結晶形の生成
 
 #### FR-3: サンプル生成 (Sample Generation)
 - **FR-3.1**: 結晶構造の生成
@@ -107,44 +124,116 @@ This specification defines the detailed requirements for extending the existing 
 
 ### 2.1 入力データ形式
 
-#### 2.1.1 ASEデータベース形式
-分子性結晶データは以下の情報を含むASE Atomsオブジェクトとして格納:
+#### 2.1.1 ホモ結晶のためのデータセット構造
 
+**二層構造のデータセット**:
+
+```
+molecular_dataset/
+├── molecules.db              # 単分子のASEデータベース
+│   ├── Molecule 1 (xyz coordinates, no cell, no pbc)
+│   ├── Molecule 2
+│   └── ...
+│
+└── crystals.db               # 分子性結晶のASEデータベース
+    ├── Crystal 1 (linked to Molecule 1)
+    ├── Crystal 2 (linked to Molecule 1, polymorph)
+    ├── Crystal 3 (linked to Molecule 2)
+    └── ...
+```
+
+#### 2.1.2 単分子データ形式
 ```python
-# 必須フィールド
-atoms = Atoms(
+# molecules.db内の単分子
+molecule = Atoms(
+    symbols=['C', 'H', 'N', ...],      # 原子種
+    positions=[[x1,y1,z1], ...],       # 分子のxyz座標（Å）
+    # cell, pbcは設定しない（非周期系）
+)
+
+# 必須メタデータ（molecule.info内）
+molecule.info = {
+    'molecule_id': str or int,          # 一意な分子ID
+    'smiles': str,                      # SMILES文字列（オプション）
+    'molecular_weight': float,          # 分子量
+    'molecular_volume': float,          # van der Waals体積
+    'inertia_tensor': array,            # 慣性テンソル
+    'dipole_moment': float,             # 双極子モーメント（オプション）
+    'quadrupole_moment': array,         # 四重極モーメント（オプション）
+}
+```
+
+#### 2.1.3 分子性結晶データ形式
+```python
+# crystals.db内の結晶構造
+crystal = Atoms(
     symbols=['C', 'H', 'N', ...],      # 原子種
     positions=[[x1,y1,z1], ...],       # 原子座標（Å）
     cell=[[a1,a2,a3], [b1,b2,b3], [c1,c2,c3]],  # 単位格子ベクトル
     pbc=[True, True, True]              # 周期境界条件
 )
 
-# オプションフィールド（atoms.info内）
-atoms.info = {
+# 必須フィールド（crystal.info内）
+crystal.info = {
+    'molecule_id': str or int,          # 対応する分子のID（molecules.dbへのリンク）
+    'polymorph_id': str or int,         # 結晶多形の識別子（同一分子の異なる結晶形）
     'space_group': int,                 # 空間群番号（1-230）
     'space_group_symbol': str,          # 空間群記号（例: 'P21/c'）
     'crystal_density': float,           # 密度（g/cm³）
     'crystal_volume': float,            # 単位格子体積（Å³）
-    'Z': int,                          # 非対称単位あたりの分子数
+    'Z': int,                          # 単位格子あたりの分子数
+    'Z_prime': float,                  # 非対称単位あたりの分子数
     'temperature': float,               # 測定温度（K）
     'pressure': float,                  # 測定圧力（GPa）
 }
 ```
 
-#### 2.1.2 データセット構造
+#### 2.1.4 分子-結晶リンクの例
 ```
-database.db (ASE database)
-├── Structure 1 (Atoms object with cell and pbc)
-├── Structure 2 (Atoms object with cell and pbc)
-└── ...
+Molecule A (molecule_id='mol_001')
+  ├→ Crystal A-I (polymorph_id='form_I')   # Form I
+  ├→ Crystal A-II (polymorph_id='form_II')  # Form II (polymorph)
+  └→ Crystal A-III (polymorph_id='form_III') # Form III (another polymorph)
+
+Molecule B (molecule_id='mol_002')
+  └→ Crystal B (polymorph_id='form_I')      # Only one known form
 ```
 
 ### 2.2 内部データ表現
 
-#### 2.2.1 結晶構造の表現
+#### 2.2.1 分子特徴量の表現
+```python
+molecular_features = {
+    # 幾何学的特徴量
+    'molecular_geometry': torch.Tensor,     # [n_mol_atoms, 3] - 分子のxyz座標（重心基準）
+    'molecular_volume': torch.Tensor,       # [1] - van der Waals体積
+    'molecular_surface_area': torch.Tensor, # [1] - 分子表面積
+    'gyration_radius': torch.Tensor,        # [1] - 回転半径
+    
+    # 形状記述子
+    'principal_moments': torch.Tensor,      # [3] - 主慣性モーメント
+    'asphericity': torch.Tensor,            # [1] - 非球面度
+    'acylindricity': torch.Tensor,          # [1] - 非円筒度
+    'shape_anisotropy': torch.Tensor,       # [1] - 形状異方性
+    
+    # 電子的特徴量（オプション）
+    'dipole_moment': torch.Tensor,          # [3] - 双極子モーメントベクトル
+    'quadrupole_moment': torch.Tensor,      # [3, 3] - 四重極モーメントテンソル
+    'polarizability': torch.Tensor,         # [1] - 分極率（オプション）
+    
+    # グラフ表現
+    'molecular_graph': {
+        'atom_types': torch.LongTensor,     # [n_mol_atoms] - 分子内の原子種
+        'edge_index': torch.LongTensor,     # [2, n_mol_bonds] - 結合情報
+        'edge_attr': torch.Tensor,          # [n_mol_bonds, edge_dim] - 結合特徴
+    },
+}
+```
+
+#### 2.2.2 結晶構造の表現（分子特徴量を含む）
 ```python
 crystal_data = {
-    # 原子情報
+    # 結晶の原子情報
     'positions': torch.Tensor,          # [n_atoms, 3] - 分数座標または絶対座標
     'atom_types': torch.LongTensor,     # [n_atoms] - 原子種インデックス
     'charges': torch.Tensor,            # [n_atoms] - 電荷（オプション）
@@ -157,14 +246,20 @@ crystal_data = {
     # 周期性情報
     'pbc': torch.BoolTensor,            # [3] - 各方向の周期境界条件
     
+    # 分子情報（ホモ結晶用）
+    'molecule_id': torch.LongTensor,    # [1] - 対応する分子のID
+    'polymorph_id': torch.LongTensor,   # [1] - 結晶多形の識別子
+    'molecular_features': dict,         # 上記の分子特徴量辞書
+    
     # メタデータ
     'space_group': torch.LongTensor,    # [1] - 空間群番号
     'n_atoms': int,                     # 単位格子内の原子数
     'n_molecules': int,                 # 単位格子内の分子数（Z値）
+    'Z_prime': float,                   # 非対称単位あたりの分子数
 }
 ```
 
-#### 2.2.2 座標系の定義
+#### 2.2.3 座標系の定義
 - **分数座標 (Fractional Coordinates)**: 単位格子ベクトルを基底とした座標系（0〜1の範囲）
   - 利点: 格子変形に対して不変
   - 使用場面: 格子パラメータの変更時
@@ -172,11 +267,22 @@ crystal_data = {
 - **絶対座標 (Cartesian Coordinates)**: デカルト座標系（Å単位）
   - 利点: 距離計算が直感的
   - 使用場面: ニューラルネットワークの入力
+  
+- **分子中心座標 (Molecular Center Coordinates)**: 分子の重心を原点とした座標系
+  - 利点: 分子の回転・並進に対して不変
+  - 使用場面: 分子特徴量の抽出
 
 変換式:
 ```
+# 結晶座標変換
 r_cart = cell_vectors @ r_frac
 r_frac = cell_vectors^(-1) @ r_cart
+
+# 分子中心座標
+r_mol_center = r_mol - centroid(r_mol)
+
+# 分子の配向（慣性主軸への変換）
+r_principal = rotation_matrix(inertia_tensor) @ r_mol_center
 ```
 
 ### 2.3 出力データ形式
