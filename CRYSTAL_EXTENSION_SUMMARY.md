@@ -103,7 +103,34 @@ This project provides comprehensive specifications and design for extending the 
 
 ## 🎯 主要な技術的貢献 (Key Technical Contributions)
 
-### 1. 周期境界条件のサポート (Periodic Boundary Conditions)
+### 1. ホモ結晶生成のための分子-結晶統合 (Molecule-Crystal Integration for Homo-Crystals)
+
+**課題**: 単一分子種から構成される結晶（ホモ結晶）を生成するには、分子の特性と結晶構造の関係性を学習する必要がある。
+
+**解決策**:
+- **二層データセット構造**: molecules.db (単分子) + crystals.db (結晶)
+- **分子特徴量の自動抽出**: xyz座標から幾何学的・物理的特徴を計算
+  - 幾何学的特徴: 分子体積、回転半径、広がり
+  - 形状記述子: 慣性テンソル、非球面度、非円筒度
+  - 電子的特徴: 双極子モーメント、四重極モーメント（オプション）
+  - グラフ表現: 分子グラフ、結合情報
+- **molecule_id によるリンク**: 各結晶がどの分子に対応するかを明示
+- **polymorph_id による多形管理**: 同一分子の異なる結晶形を区別
+
+**理論的根拠**:
+- 全特徴量は物理的・数学的に定義された量（ヒューリスティックフリー）
+- 慣性テンソルは分子の形状異方性を理論的に記述
+- van der Waals体積は実験的に検証された原子半径を使用
+
+**実装場所**: 
+- `crystal/data/molecular_features.py` - 特徴量抽出
+- `crystal/data/molecule_crystal_pair.py` - ペアリング
+- `crystal/models/molecular_feature_encoder.py` - モデル統合
+- 詳細は `MOLECULAR_FEATURES_EXTENSION.md` を参照
+
+---
+
+### 2. 周期境界条件のサポート (Periodic Boundary Conditions)
 
 **課題**: 既存のEDMはユークリッド空間を前提としており、周期性のあるトーラス空間には対応していない。
 
@@ -116,7 +143,7 @@ This project provides comprehensive specifications and design for extending the 
 
 ---
 
-### 2. 格子パラメータの学習 (Lattice Parameter Learning)
+### 2. 周期境界条件のサポート (Periodic Boundary Conditions)
 
 **課題**: 格子パラメータ (a, b, c, α, β, γ) は原子座標とは異なるスケールと制約を持つ。
 
@@ -129,7 +156,7 @@ This project provides comprehensive specifications and design for extending the 
 
 ---
 
-### 3. E(3)等変性の拡張 (E(3) Equivariance Extension)
+### 3. 格子パラメータの学習 (Lattice Parameter Learning)
 
 **課題**: 周期的な系では、並進対称性が格子ベクトルの整数倍に離散化される。
 
@@ -142,7 +169,7 @@ This project provides comprehensive specifications and design for extending the 
 
 ---
 
-### 4. 条件付き生成 (Conditional Generation)
+### 4. E(3)等変性の拡張 (E(3) Equivariance Extension)
 
 **新機能**:
 - **空間群**: 230種類の空間群による条件付け
