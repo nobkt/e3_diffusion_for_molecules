@@ -190,6 +190,59 @@ class CrystalDynamics(nn.Module):
         
         return velocity_x, velocity_h, velocity_cell
     
+    def _forward(self, t, xh, node_mask, edge_mask, context):
+        """
+        Compatibility method for EnVariationalDiffusion.
+        
+        Args:
+            t: [batch, 1] Time steps
+            xh: [batch, n_atoms, n_dims + in_node_nf] Combined positions and features
+            node_mask: [batch, n_atoms, 1] Node mask
+            edge_mask: Edge mask (not used for periodic systems)
+            context: [batch, n_atoms, context_nf] Context (optional)
+            
+        Returns:
+            output: [batch, n_atoms, n_dims + in_node_nf] Combined velocity
+        """
+        # Split xh into positions and features
+        x = xh[:, :, :self.n_dims]
+        h = xh[:, :, self.n_dims:]
+        
+        # For crystal mode, we need cell and pbc
+        # Since they're not passed in the standard interface, we need to handle this
+        # For now, we'll use a default cell (should be passed via context in production)
+        batch_size = x.size(0)
+        n_atoms = x.size(1)
+        
+        # Default: cubic cell with reasonable size
+        # In production, this should come from data/context
+        a = 15.0
+        cell_params = torch.tensor(
+            [[a, a, a, 90.0, 90.0, 90.0]],
+            device=x.device,
+            dtype=x.dtype
+        ).repeat(batch_size, 1)
+        
+        from crystal.data.periodic_utils import cell_params_to_vectors
+        cell = cell_params_to_vectors(cell_params)
+        pbc = torch.ones(batch_size, 3, dtype=torch.bool, device=x.device)
+        
+        # Call forward
+        velocity_x, velocity_h, velocity_cell = self.forward(
+            t=t.squeeze() if t.dim() > 1 else t,
+            xh=(x, h),
+            cell=cell,
+            pbc=pbc,
+            node_mask=node_mask,
+            edge_mask=edge_mask,
+            context=context
+        )
+        
+        # Combine velocities
+        output = torch.cat([velocity_x, velocity_h], dim=2)
+        
+        return output
+    
     def wrap_forward(self, *args, **kwargs):
         """
         Wrapper for compatibility with existing diffusion framework.

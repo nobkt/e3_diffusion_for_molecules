@@ -78,7 +78,7 @@ def sample_crystal(
         
         # Create edge mask (fully connected)
         edge_mask = (1 - torch.eye(n_nodes)).unsqueeze(0)
-        edge_mask = edge_mask.repeat(batch_size, 1, 1).to(device)
+        edge_mask = edge_mask.repeat(batch_size, 1, 1).view(-1, 1).to(device)
         
         # Initialize cell parameters if not provided
         if cell_params is None:
@@ -90,31 +90,37 @@ def sample_crystal(
                 dtype=torch.float32
             ).repeat(batch_size, 1)
         
-        # Convert cell params to vectors
-        cell = cell_params_to_vectors(cell_params)
-        
         # PBC flags (all True for crystals)
         pbc = torch.ones(batch_size, 3, dtype=torch.bool, device=device)
         
-        # Sample from model
-        # Note: This requires the model to have a sample() or sample_chain() method
-        # For now, we'll raise NotImplementedError as a clear indicator
-        raise NotImplementedError(
-            "Crystal sampling requires implementing sample() or sample_chain() method "
-            "in the crystal diffusion model. This should follow the diffusion sampling "
-            "procedure with reverse-time integration, handling both positions and cell "
-            "parameters. See en_diffusion.py for reference implementation."
+        # Sample from model using CrystalDiffusion
+        # The model should be a CrystalDiffusion instance
+        if not hasattr(model, 'sample') or not callable(getattr(model, 'sample')):
+            raise ValueError(
+                "Model must have a sample() method. "
+                "Use CrystalDiffusion wrapper around your dynamics model."
+            )
+        
+        # Sample positions, features, and cell parameters
+        x, h, final_cell_params = model.sample(
+            n_samples=batch_size,
+            n_nodes=n_nodes,
+            node_mask=node_mask,
+            edge_mask=edge_mask,
+            context=context,
+            cell_params=cell_params,
+            pbc=pbc,
+            fix_noise=False
         )
         
-        # Placeholder for what the implementation should return:
-        # After implementing sampling:
-        # - one_hot: sampled atom types
-        # - charges: sampled charges (or zeros)
-        # - x: sampled positions
-        # - cell: final cell vectors
-        # - node_mask: node mask
+        # Extract one_hot and charges from h
+        one_hot = h['categorical']
+        charges = h.get('integer', torch.zeros_like(one_hot[:, :, :1]))
         
-        # return one_hot, charges, x, cell, node_mask
+        # Convert final cell params to vectors
+        cell = cell_params_to_vectors(final_cell_params)
+        
+        return one_hot, charges, x, cell, node_mask
 
 
 def sample_crystal_chain(
@@ -159,7 +165,7 @@ def sample_crystal_chain(
         # Setup similar to sample_crystal
         node_mask = torch.ones(n_samples, n_nodes, 1, device=device)
         edge_mask = (1 - torch.eye(n_nodes)).unsqueeze(0)
-        edge_mask = edge_mask.repeat(n_samples, 1, 1).to(device)
+        edge_mask = edge_mask.repeat(n_samples, 1, 1).view(-1, 1).to(device)
         
         # Default cell
         a = 15.0
@@ -168,7 +174,6 @@ def sample_crystal_chain(
             device=device,
             dtype=torch.float32
         )
-        cell = cell_params_to_vectors(cell_params)
         
         pbc = torch.ones(n_samples, 3, dtype=torch.bool, device=device)
         
@@ -179,11 +184,42 @@ def sample_crystal_chain(
             # For now, leave as None
             pass
         
-        raise NotImplementedError(
-            "Crystal chain sampling requires implementing sample_chain() method "
-            "in the crystal diffusion model with keep_frames support. This should "
-            "store intermediate states during reverse-time integration."
+        # Sample chain using CrystalDiffusion
+        if not hasattr(model, 'sample_chain') or not callable(getattr(model, 'sample_chain')):
+            raise ValueError(
+                "Model must have a sample_chain() method. "
+                "Use CrystalDiffusion wrapper around your dynamics model."
+            )
+        
+        # Sample trajectory
+        chain, cell_chain = model.sample_chain(
+            n_samples=n_samples,
+            n_nodes=n_nodes,
+            node_mask=node_mask,
+            edge_mask=edge_mask,
+            context=context,
+            cell_params=cell_params,
+            pbc=pbc,
+            keep_frames=keep_frames
         )
+        
+        # Extract positions and features from chain
+        # chain is [n_frames*n_samples, n_nodes, n_dims + n_features]
+        x = chain[:, :, :3]  # positions
+        h_cat = chain[:, :, 3:]  # features
+        
+        # For simplicity, return as one_hot (categorical features)
+        one_hot = h_cat
+        charges = torch.zeros(chain.size(0), chain.size(1), 1, device=device)
+        
+        # Cell chain is [n_frames, n_samples, 6]
+        # Convert to vectors for each frame
+        n_frames = cell_chain.size(0)
+        cell = torch.zeros(n_frames, n_samples, 3, 3, device=device)
+        for i in range(n_frames):
+            cell[i] = cell_params_to_vectors(cell_chain[i])
+        
+        return one_hot, charges, x, cell
 
 
 def validate_and_save_crystal(

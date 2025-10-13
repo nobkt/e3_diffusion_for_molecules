@@ -222,12 +222,22 @@ def train_epoch_crystal(
         # Zero gradients
         optim.zero_grad()
         
-        # Compute loss
-        # Note: Crystal model needs to handle cell parameters
+        # Extract cell parameters and PBC from data
+        cell_params = data.get('cell_params', None)
+        pbc = data.get('pbc', None)
+        
+        if cell_params is not None:
+            cell_params = cell_params.to(device, dtype)
+        if pbc is not None:
+            pbc = pbc.to(device)
+        
+        # Compute loss with crystal-specific handling
         try:
-            nll, reg_term, mean_abs_z = losses.compute_loss_and_nll(
+            nll, reg_term, mean_abs_z = losses.compute_loss_and_nll_crystal(
                 args, model_dp, nodes_dist,
-                x, h, node_mask, edge_mask, context
+                x, h, node_mask, edge_mask, context,
+                cell_params=cell_params, pbc=pbc
+            )
             )
         except Exception as e:
             print(f"Error computing loss: {e}")

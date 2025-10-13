@@ -6,12 +6,14 @@ Modules:
 - periodic_egnn: Periodic E(3) equivariant graph neural network
 - lattice_diffusion: Lattice parameter diffusion model
 - crystal_dynamics: Integrated crystal dynamics model
+- crystal_diffusion: Crystal-specific diffusion sampling
 """
 
 from .molecular_encoder import MolecularEncoder, create_fully_connected_edges
 from .periodic_egnn import PeriodicEGNN, PeriodicEGNNLayer
 from .lattice_diffusion import LatticeDiffusion
 from .crystal_dynamics import CrystalDynamics
+from .crystal_diffusion import CrystalDiffusion
 
 __all__ = [
     'MolecularEncoder',
@@ -20,4 +22,5 @@ __all__ = [
     'PeriodicEGNNLayer',
     'LatticeDiffusion',
     'CrystalDynamics',
+    'CrystalDiffusion',
 ]
