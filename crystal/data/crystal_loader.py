@@ -46,6 +46,7 @@ class CrystalDataset(Dataset):
         include_charges: bool = False,
     ):
         self.db_path = db_path
+        # Store 0-based indices for consistency with PyTorch datasets
         self.indices = indices
         self.molecule_dataset = molecule_dataset
         self.molecule_crystal_mapper = molecule_crystal_mapper
@@ -68,8 +69,9 @@ class CrystalDataset(Dataset):
         """Scan dataset to build atom type encoder"""
         all_atomic_numbers = set()
         
+        # self.indices contains 0-based indices (list indices), convert to 1-based for ASE DB
         for idx in self.indices:
-            row = self.db.get(idx + 1)  # ASE DB is 1-indexed
+            row = self.db.get(idx + 1)  # Convert to 1-based for ASE DB
             atoms = row.toatoms()
             all_atomic_numbers.update(atoms.numbers)
         
@@ -102,9 +104,9 @@ class CrystalDataset(Dataset):
                 - space_group: [1] space group number (if available)
                 - density: [1] crystal density (if available)
         """
-        # Get from database
+        # Get from database (self.indices contains 0-based indices, convert to 1-based for ASE DB)
         db_idx = self.indices[idx]
-        row = self.db.get(db_idx + 1)  # ASE DB is 1-indexed
+        row = self.db.get(db_idx + 1)  # Convert to 1-based for ASE DB
         atoms = row.toatoms()
         
         # Extract IDs

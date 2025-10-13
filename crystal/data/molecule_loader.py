@@ -38,10 +38,13 @@ class MoleculeDataset(Dataset):
         # Connect to database
         self.db = connect(db_path)
         
-        # Set indices (ASE DB is 1-indexed)
+        # Set indices (ASE DB is 1-indexed, so we store 1-based indices directly)
+        # If indices are provided, we assume they are 0-based and convert to 1-based
+        # If no indices provided, we use all entries (1-indexed)
         if indices is None:
             self.indices = list(range(1, len(self.db) + 1))
         else:
+            # Convert 0-based input indices to 1-based database indices
             self.indices = [i + 1 for i in indices]
         
         # Build atom encoder from dataset
@@ -51,6 +54,7 @@ class MoleculeDataset(Dataset):
         """Scan dataset to build atom type encoder"""
         all_atomic_numbers = set()
         
+        # self.indices contains 1-based indices for ASE DB
         for idx in self.indices:
             row = self.db.get(idx)
             atoms = row.toatoms()
@@ -77,7 +81,7 @@ class MoleculeDataset(Dataset):
                 - molecule_id: molecule identifier (str or int)
                 - num_atoms: [1] number of atoms
         """
-        # Get from database
+        # Get from database (indices are 1-based for ASE DB)
         db_idx = self.indices[idx]
         row = self.db.get(db_idx)
         atoms = row.toatoms()
