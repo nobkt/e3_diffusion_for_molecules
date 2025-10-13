@@ -3,9 +3,9 @@
 
 ## 概要 (Overview)
 
-本設計書は、E(3)等変拡散モデルを分子性結晶生成に拡張するための詳細な実装設計を提供します。既存のコードベースに最小限の変更で統合できるよう、モジュール構造と実装の詳細を定義します。
+本設計書は、E(3)等変拡散モデルを**ホモ結晶（同一分子からなる分子性結晶）**の生成に拡張するための詳細な実装設計を提供します。**単分子のEGNN特徴量を結晶生成に統合**することで、分子の構造情報を活用した理論的に正しい結晶生成を実現します。既存のコードベースに最小限の変更で統合できるよう、モジュール構造と実装の詳細を定義します。
 
-This design document provides detailed implementation specifications for extending the E(3) Equivariant Diffusion Model to support molecular crystal generation. The design ensures minimal modifications to the existing codebase through a modular architecture.
+This design document provides detailed implementation specifications for extending the E(3) Equivariant Diffusion Model to support **homocrystal generation (molecular crystals composed of identical molecules)**. By **integrating single-molecule EGNN features into crystal generation**, we achieve theoretically sound crystal generation that leverages molecular structural information. The design ensures minimal modifications to the existing codebase through a modular architecture.
 
 ---
 
@@ -23,21 +23,26 @@ e3_diffusion_for_molecules/
 │
 ├── crystal/                                # [新規] 結晶専用モジュール
 │   ├── __init__.py                         # モジュール初期化
+│   │
 │   ├── data/                               # データ処理
 │   │   ├── __init__.py
-│   │   ├── crystal_loader.py               # 結晶データローダー
+│   │   ├── molecule_loader.py              # ★NEW: 単分子データローダー
+│   │   ├── crystal_loader.py               # 結晶データローダー (molecule_id連携)
+│   │   ├── molecule_crystal_mapper.py      # ★NEW: 分子-結晶マッピング管理
 │   │   ├── periodic_utils.py               # 周期境界条件ユーティリティ
 │   │   ├── coordinate_transform.py         # 座標変換（分数↔デカルト）
 │   │   └── symmetry_handler.py             # 空間群・対称性処理
 │   │
 │   ├── models/                             # モデル拡張
 │   │   ├── __init__.py
-│   │   ├── periodic_egnn.py                # 周期的EGNN
+│   │   ├── molecular_encoder.py            # ★NEW: 単分子EGNN特徴量エンコーダ
+│   │   ├── periodic_egnn.py                # 周期的EGNN (molecular features conditioned)
 │   │   ├── lattice_diffusion.py            # 格子パラメータ拡散
-│   │   └── crystal_dynamics.py             # 結晶構造拡散統合モデル
+│   │   └── crystal_dynamics.py             # 結晶構造拡散統合モデル (with mol features)
 │   │
 │   ├── conditioning/                        # 条件付けモジュール
 │   │   ├── __init__.py
+│   │   ├── molecular_conditioning.py        # ★NEW: 分子特徴量条件付け (PRIMARY)
 │   │   ├── space_group_embedding.py        # 空間群埋め込み
 │   │   ├── density_conditioning.py         # 密度条件付け
 │   │   └── lattice_conditioning.py         # 格子パラメータ条件付け
@@ -67,17 +72,274 @@ e3_diffusion_for_molecules/
 ├── sample_crystal.py                       # [新規] 結晶サンプリングスクリプト
 │
 └── tests/                                  # テスト
+    ├── test_molecule_loader.py            # [新規] 分子ローダーテスト
     ├── test_crystal_loader.py              # [新規] データローダーテスト
+    ├── test_mol_crys_mapper.py             # [新規] マッピングテスト
+    ├── test_molecular_encoder.py           # [新規] 分子エンコーダテスト
     ├── test_periodic_utils.py              # [新規] 周期性テスト
     ├── test_periodic_egnn.py               # [新規] モデルテスト
     └── test_crystal_integration.py         # [新規] 統合テスト
 ```
 
+**★ 新規追加モジュール (ホモ結晶対応)**:
+- `crystal/data/molecule_loader.py`: 単分子データの読み込み
+- `crystal/data/molecule_crystal_mapper.py`: 分子IDと結晶IDのマッピング管理
+- `crystal/models/molecular_encoder.py`: 単分子EGNN特徴量エンコーダ
+- `crystal/conditioning/molecular_conditioning.py`: 分子特徴量による条件付け
+
 ---
 
 ## 2. データ処理層の設計 (Data Processing Layer Design)
 
-### 2.1 結晶データローダー (Crystal Data Loader)
+### 2.0 分子-結晶データセット統合アーキテクチャ
+
+**重要**: ホモ結晶生成では、分子データセットと結晶データセットを**理論的に正しく**統合します。
+
+```
+データフロー (Data Flow):
+
+molecules.db ─┐
+               ├─→ MoleculeCrystalMapper ─→ 統合データセット
+crystals.db ─┘
+
+1. 分子ローダー: molecules.dbから単分子のxyz座標を読み込み
+2. 結晶ローダー: crystals.dbから結晶構造+molecule_idを読み込み
+3. マッパー: molecule_idでリンクし、分子特徴量を結晶に紐付け
+```
+
+### 2.1 単分子データローダー (Molecule Data Loader)
+
+#### ファイル: `crystal/data/molecule_loader.py`
+
+```python
+"""
+単分子データをASEデータベースから読み込み
+"""
+
+import torch
+import numpy as np
+from ase.db import connect
+from typing import Dict, List, Optional
+from torch.utils.data import Dataset
+
+
+class MoleculeDataset(Dataset):
+    """
+    単分子データセット
+    
+    既存の単分子生成モデルと同じ形式で分子データを読み込み
+    EGNN特徴量抽出の入力として使用
+    """
+    
+    def __init__(
+        self,
+        db_path: str,
+        indices: Optional[List[int]] = None,
+        remove_h: bool = False,
+    ):
+        """
+        Args:
+            db_path: 分子データベースのパス (molecules.db)
+            indices: 使用するデータのインデックスリスト (Noneの場合は全て)
+            remove_h: 水素原子を除去するか
+        """
+        self.db_path = db_path
+        self.remove_h = remove_h
+        
+        # データベース接続
+        self.db = connect(db_path)
+        
+        # インデックス設定
+        if indices is None:
+            self.indices = list(range(1, len(self.db) + 1))
+        else:
+            self.indices = [i + 1 for i in indices]  # ASE DBは1-indexed
+        
+        # 原子種の辞書を構築
+        self._build_atom_encoder()
+    
+    def _build_atom_encoder(self):
+        """データセット全体をスキャンして原子種辞書を構築"""
+        all_atomic_numbers = set()
+        
+        for idx in self.indices:
+            row = self.db.get(idx)
+            atoms = row.toatoms()
+            all_atomic_numbers.update(atoms.numbers)
+        
+        sorted_atomic_numbers = sorted(all_atomic_numbers)
+        self.atom_encoder = {num: i for i, num in enumerate(sorted_atomic_numbers)}
+        self.atom_decoder = sorted_atomic_numbers
+        self.num_atom_types = len(self.atom_decoder)
+    
+    def __len__(self):
+        return len(self.indices)
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """
+        単一の分子を取得
+        
+        Returns:
+            data: 以下のキーを含む辞書
+                - positions: [n_atoms, 3] 分子内原子座標
+                - atom_types: [n_atoms] 原子種インデックス
+                - one_hot: [n_atoms, num_atom_types] ワンホット表現
+                - molecule_id: 分子ID（文字列またはint）
+                - num_atoms: [1] 原子数
+        """
+        # データベースから取得
+        db_idx = self.indices[idx]
+        row = self.db.get(db_idx)
+        atoms = row.toatoms()
+        
+        # 分子IDを取得 (info, key-value, またはidから)
+        if hasattr(row, 'molecule_id'):
+            molecule_id = row.molecule_id
+        elif hasattr(row, 'data') and 'molecule_id' in row.data:
+            molecule_id = row.data['molecule_id']
+        elif hasattr(row, 'key_value_pairs') and 'molecule_id' in row.key_value_pairs:
+            molecule_id = row.key_value_pairs['molecule_id']
+        else:
+            # フォールバックとしてDB IDを使用 (推奨されない)
+            molecule_id = str(db_idx)
+        
+        # 水素除去
+        if self.remove_h:
+            mask = atoms.numbers != 1
+            atoms = atoms[mask]
+        
+        # 座標取得
+        positions = torch.tensor(atoms.positions, dtype=torch.float32)
+        
+        # 原子種情報
+        atomic_numbers = atoms.numbers
+        atom_types = torch.tensor(
+            [self.atom_encoder[num] for num in atomic_numbers],
+            dtype=torch.long
+        )
+        
+        # ワンホット表現
+        one_hot = torch.zeros(len(atoms), self.num_atom_types, dtype=torch.float32)
+        one_hot.scatter_(1, atom_types.unsqueeze(1), 1.0)
+        
+        data = {
+            'positions': positions,
+            'atom_types': atom_types,
+            'one_hot': one_hot,
+            'molecule_id': molecule_id,
+            'num_atoms': torch.tensor([len(atoms)], dtype=torch.long),
+        }
+        
+        return data
+```
+
+### 2.2 分子-結晶マッピング管理 (Molecule-Crystal Mapper)
+
+#### ファイル: `crystal/data/molecule_crystal_mapper.py`
+
+```python
+"""
+分子IDと結晶IDのマッピングを管理
+"""
+
+import json
+from typing import Dict, List, Optional
+from pathlib import Path
+
+
+class MoleculeCrystalMapper:
+    """
+    分子-結晶の対応関係を管理するクラス
+    
+    molecule_crystal_map.jsonを読み込み、
+    molecule_id → crystal_ids の対応を管理
+    """
+    
+    def __init__(self, map_file_path: Optional[str] = None):
+        """
+        Args:
+            map_file_path: マッピングファイルのパス (JSON)
+                            Noneの場合は動的に構築
+        """
+        self.map_file_path = map_file_path
+        self.mol_to_crystals: Dict[str, List[str]] = {}
+        self.crystal_to_mol: Dict[str, str] = {}
+        
+        if map_file_path and Path(map_file_path).exists():
+            self._load_mapping(map_file_path)
+    
+    def _load_mapping(self, map_file_path: str):
+        """JSONファイルからマッピングを読み込み"""
+        with open(map_file_path, 'r') as f:
+            data = json.load(f)
+        
+        for mol_id, mol_data in data.items():
+            crystal_ids = mol_data.get('crystal_ids', [])
+            self.mol_to_crystals[mol_id] = crystal_ids
+            
+            for crys_id in crystal_ids:
+                self.crystal_to_mol[crys_id] = mol_id
+    
+    def build_from_databases(
+        self,
+        molecule_db_path: str,
+        crystal_db_path: str
+    ):
+        """
+        データベースから動的にマッピングを構築
+        
+        crystals.dbの各エントリのmolecule_id情報を使用
+        """
+        from ase.db import connect
+        
+        crystal_db = connect(crystal_db_path)
+        
+        for row in crystal_db.select():
+            # 結晶IDを取得
+            if hasattr(row, 'crystal_id'):
+                crystal_id = row.crystal_id
+            elif hasattr(row, 'data') and 'crystal_id' in row.data:
+                crystal_id = row.data['crystal_id']
+            else:
+                crystal_id = str(row.id)
+            
+            # 分子IDを取得
+            if hasattr(row, 'molecule_id'):
+                molecule_id = row.molecule_id
+            elif hasattr(row, 'data') and 'molecule_id' in row.data:
+                molecule_id = row.data['molecule_id']
+            else:
+                raise ValueError(f"Crystal {crystal_id} has no molecule_id")
+            
+            # マッピングに追加
+            if molecule_id not in self.mol_to_crystals:
+                self.mol_to_crystals[molecule_id] = []
+            self.mol_to_crystals[molecule_id].append(crystal_id)
+            self.crystal_to_mol[crystal_id] = molecule_id
+    
+    def get_crystals_for_molecule(self, molecule_id: str) -> List[str]:
+        """指定された分子に対応する結晶IDリストを取得"""
+        return self.mol_to_crystals.get(molecule_id, [])
+    
+    def get_molecule_for_crystal(self, crystal_id: str) -> Optional[str]:
+        """指定された結晶に対応する分子IDを取得"""
+        return self.crystal_to_mol.get(crystal_id)
+    
+    def save_mapping(self, output_path: str):
+        """マッピングをJSONファイルに保存"""
+        data = {}
+        for mol_id, crys_ids in self.mol_to_crystals.items():
+            data[mol_id] = {
+                'molecule_id': mol_id,
+                'crystal_ids': crys_ids,
+                'num_polymorphs': len(crys_ids)
+            }
+        
+        with open(output_path, 'w') as f:
+            json.dump(data, f, indent=2)
+```
+
+### 2.3 結晶データローダー (Crystal Data Loader)
 
 #### ファイル: `crystal/data/crystal_loader.py`
 
@@ -95,15 +357,18 @@ from torch.utils.data import Dataset
 
 class CrystalDataset(Dataset):
     """
-    分子性結晶データセット
+    分子性結晶データセット (ホモ結晶対応)
     
     ASE Atomsオブジェクトを内部表現に変換し、バッチ処理可能な形式で提供
+    molecule_idによる分子データとの連携をサポート
     """
     
     def __init__(
         self,
         db_path: str,
         indices: List[int],
+        molecule_dataset: Optional['MoleculeDataset'] = None,
+        molecule_crystal_mapper: Optional['MoleculeCrystalMapper'] = None,
         remove_h: bool = False,
         use_fractional_coords: bool = True,
         cutoff_radius: float = 10.0,
@@ -112,8 +377,10 @@ class CrystalDataset(Dataset):
     ):
         """
         Args:
-            db_path: ASEデータベースのパス
+            db_path: ASEデータベースのパス (crystals.db)
             indices: 使用するデータのインデックスリスト
+            molecule_dataset: 単分子データセット (オプション)
+            molecule_crystal_mapper: 分子-結晶マッパー (オプション)
             remove_h: 水素原子を除去するか
             use_fractional_coords: 分数座標を使用するか（Falseの場合はデカルト座標）
             cutoff_radius: 近傍計算のカットオフ半径（Å）
@@ -122,6 +389,8 @@ class CrystalDataset(Dataset):
         """
         self.db_path = db_path
         self.indices = indices
+        self.molecule_dataset = molecule_dataset
+        self.molecule_crystal_mapper = molecule_crystal_mapper
         self.remove_h = remove_h
         self.use_fractional_coords = use_fractional_coords
         self.cutoff_radius = cutoff_radius
@@ -133,6 +402,9 @@ class CrystalDataset(Dataset):
         
         # 原子種の辞書を構築
         self._build_atom_encoder()
+        
+        # 分子データのキャッシュ (効率化のため)
+        self.molecule_cache: Dict[str, Dict] = {}
         
     def _build_atom_encoder(self):
         """データセット全体をスキャンして原子種辞書を構築"""
