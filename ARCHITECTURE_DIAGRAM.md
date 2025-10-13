@@ -6,7 +6,8 @@
 ```
 ╔════════════════════════════════════════════════════════════════════════════════╗
 ║                      Molecular Crystal Generation System                       ║
-║                    分子性結晶生成システム (E3DM Extended)                        ║
+║              分子性結晶生成システム (E3DM Extended for Homocrystals)            ║
+║                     ★ ホモ結晶生成 with 単分子EGNN特徴量 ★                      ║
 ╚════════════════════════════════════════════════════════════════════════════════╝
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -14,11 +15,16 @@
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                               │
 │  ┏━━━━━━━━━━━━━━━━━━┓  ┏━━━━━━━━━━━━━━━━━━┓  ┏━━━━━━━━━━━━━━━━━━┓         │
-│  ┃ ASE Database    ┃  ┃ QM9 Dataset     ┃  ┃ GEOM Dataset    ┃         │
-│  ┃ (.db files)     ┃  ┃ (molecules)     ┃  ┃ (molecules)     ┃         │
+│  ┃ Molecule DB     ┃  ┃ Crystal DB      ┃  ┃ QM9/GEOM        ┃         │
+│  ┃ (molecules.db)  ┃  ┃ (crystals.db)   ┃  ┃ Dataset         ┃         │
+│  ┃ xyz coords      ┃  ┃ + cell + pbc    ┃  ┃ (molecules)     ┃         │
+│  ┃ No PBC          ┃  ┃ + molecule_id   ┃  ┃                 ┃         │
 │  ┗━━━━━━━━━━━━━━━━━━┛  ┗━━━━━━━━━━━━━━━━━━┛  ┗━━━━━━━━━━━━━━━━━━┛         │
 │         │                     │                      │                        │
-│         └─────────────────────┴──────────────────────┘                        │
+│         │    ┌────────────────┴──Link───────────────┘                        │
+│         │    │  molecule_id:   Mol_A → [Crys_A1, Crys_A2] (polymorphs)     │
+│         │    │                 Mol_B → [Crys_B1]                            │
+│         └────┴────────────────────────────────────────────┘                  │
 │                               │                                               │
 └───────────────────────────────┼───────────────────────────────────────────────┘
                                 │
@@ -27,13 +33,25 @@
 │                    DATA PROCESSING LAYER (データ処理層)                        │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │           ★ NEW: Molecular EGNN Feature Extractor ★                    │ │
+│  │           単分子EGNN特徴量抽出 (molecules.db → features)                 │ │
+│  ├─────────────────────────────────────────────────────────────────────────┤ │
+│  │  • Load single molecule xyz from molecules.db                          │ │
+│  │  • Build molecular graph (atoms + bonds)                               │ │
+│  │  • Extract EGNN features (node + global)                               │ │
+│  │  • Compute geometric properties (size, volume, axes)                   │ │
+│  │  • Cache features per molecule_id                                      │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+│                               │                                               │
+│                               ▼                                               │
 │  ┌─────────────────────┐         ┌──────────────────────┐                   │
 │  │ CrystalDataset      │◄────────┤ PeriodicBoundary     │                   │
 │  │ - Load structures   │         │ Handler              │                   │
 │  │ - Convert coords    │         │ - Min image distance │                   │
 │  │ - Extract cell info │         │ - Neighbor list      │                   │
-│  └─────────────────────┘         │ - Wrap positions     │                   │
-│           │                      └──────────────────────┘                   │
+│  │ - Link mol features │         │ - Wrap positions     │                   │
+│  └─────────────────────┘         └──────────────────────┘                   │
 │           │                                                                   │
 │           ▼                                                                   │
 │  ┌─────────────────────────────────────────────────────────┐                │
@@ -88,11 +106,12 @@
 │                   CONDITIONING LAYER (条件付け層)                             │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                               │
-│  ┌───────────────┐  ┌───────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │ Space Group   │  │ Density       │  │ Lattice      │  │ Molecular    │ │
-│  │ Embedding     │  │ Conditioning  │  │ Params       │  │ Properties   │ │
-│  │ (空間群)       │  │ (密度)         │  │ (格子定数)    │  │ (分子特性)    │ │
-│  └───────────────┘  └───────────────┘  └──────────────┘  └──────────────┘ │
+│  ┌──────────────┐  ┌───────────────┐  ┌───────────────┐  ┌──────────────┐ │
+│  │ ★Molecular★ │  │ Space Group   │  │ Density       │  │ Lattice      │ │
+│  │ EGNN         │  │ Embedding     │  │ Conditioning  │  │ Params       │ │
+│  │ Features     │  │ (空間群)       │  │ (密度)         │  │ (格子定数)    │ │
+│  │ (NEW)        │  │               │  │               │  │              │ │
+│  └──────────────┘  └───────────────┘  └───────────────┘  └──────────────┘ │
 │         │                  │                  │                  │          │
 │         └──────────────────┴──────────────────┴──────────────────┘          │
 │                               │                                             │
@@ -100,6 +119,9 @@
 │                  ┌─────────────────────────┐                                │
 │                  │  Context Vector         │                                │
 │                  │  (条件付けベクトル)       │                                │
+│                  │  [molecular_feat +      │                                │
+│                  │   space_group +         │                                │
+│                  │   density + ...]        │                                │
 │                  └─────────────────────────┘                                │
 │                               │                                             │
 └───────────────────────────────┼─────────────────────────────────────────────┘
@@ -157,23 +179,37 @@
 
 ## データフロー詳細 (Detailed Data Flow)
 
-### 1. Training Phase (学習フェーズ)
+### 1. Training Phase (学習フェーズ) - ホモ結晶生成
 
 ```
-┌─────────────┐
-│   Dataset   │  ASE DB with crystal structures
-│   (結晶DB)   │  • Positions (座標)
-└──────┬──────┘  • Cell (単位格子)
-       │         • PBC (周期境界条件)
-       ▼
-┌─────────────────────────┐
-│   DataLoader            │
-│   • Batch crystals      │
-│   • Apply padding       │
-│   • Convert coordinates │
-└──────┬──────────────────┘
-       │
-       ▼
+┌─────────────┐           ┌─────────────┐
+│ Molecule DB │           │ Crystal DB  │  
+│(molecules.db│           │(crystals.db)│  
+│             │  Link     │             │
+│  Mol_A      │◄─────────►│  Crys_A1    │  molecule_id = A
+│  Mol_B      │           │  Crys_A2    │  (polymorph)
+│  ...        │           │  Crys_B1    │  molecule_id = B
+└──────┬──────┘           └──────┬──────┘
+       │                         │
+       ▼                         ▼
+┌────────────────────┐  ┌────────────────────┐
+│ Molecular EGNN     │  │ Crystal DataLoader │
+│ Feature Extractor  │  │ • Batch crystals   │
+│ • Load xyz         │  │ • Apply padding    │
+│ • Build graph      │  │ • Convert coords   │
+│ • Extract features │  │ • Get cell info    │
+└──────┬─────────────┘  └──────┬─────────────┘
+       │                       │
+       │ molecule_features     │ crystal_structures
+       │                       │
+       └───────────┬───────────┘
+                   ▼
+       ┌──────────────────────────┐
+       │  Feature Concatenation   │
+       │  [crys_atoms + mol_feat] │
+       └──────┬───────────────────┘
+              │
+              ▼
 ┌───────────────────────────────────────┐
 │  Forward Diffusion (xt, cell_t)      │
 │  • Add noise to positions             │
@@ -184,13 +220,15 @@
 ┌───────────────────────────────────────┐
 │  Crystal Dynamics Model               │
 │  ┌─────────────────────────────────┐  │
-│  │ Periodic EGNN                   │  │
+│  │ Periodic EGNN (conditioned)     │  │
+│  │ • Input: mol_features           │  │
 │  │ • Compute minimum image         │  │
 │  │ • Build neighbor list           │  │
 │  │ • Message passing               │  │
 │  └─────────────────────────────────┘  │
 │  ┌─────────────────────────────────┐  │
-│  │ Lattice Diffusion               │  │
+│  │ Lattice Diffusion (conditioned) │  │
+│  │ • Input: mol_features           │  │
 │  │ • Predict lattice noise         │  │
 │  └─────────────────────────────────┘  │
 └──────┬────────────────────────────────┘
