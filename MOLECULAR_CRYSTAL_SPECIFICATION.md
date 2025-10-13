@@ -3,9 +3,9 @@
 
 ## 概要 (Overview)
 
-本仕様書は、既存のE(3)等変拡散モデル（EDM）を分子性結晶の生成に拡張するための詳細な仕様を定義します。現在のシステムは単一分子の生成に特化していますが、この拡張により周期境界条件を持つ分子性結晶構造の生成が可能になります。
+本仕様書は、既存のE(3)等変拡散モデル（EDM）を**ホモ結晶（同一分子からなる分子性結晶）**の生成に拡張するための詳細な仕様を定義します。現在のシステムは単一分子の生成に特化していますが、この拡張により周期境界条件を持つ分子性結晶構造の生成が可能になります。重要な特徴として、**単分子のEGNN特徴量を結晶生成モデルに統合**することで、分子の構造情報を活用した理論的に正しい結晶生成を実現します。
 
-This specification defines the detailed requirements for extending the existing E(3) Equivariant Diffusion Model (EDM) to support molecular crystal generation. The current system specializes in single molecule generation, but this extension will enable generation of molecular crystal structures with periodic boundary conditions.
+This specification defines the detailed requirements for extending the existing E(3) Equivariant Diffusion Model (EDM) to support **homocrystal generation (molecular crystals composed of identical molecules)**. The current system specializes in single molecule generation, but this extension will enable generation of molecular crystal structures with periodic boundary conditions. A key feature is the **integration of single-molecule EGNN features into the crystal generation model**, enabling theoretically sound crystal generation that leverages molecular structural information.
 
 ---
 
@@ -20,33 +20,57 @@ This specification defines the detailed requirements for extending the existing 
   - 分数座標または絶対座標での原子位置
   - 空間群情報（オプション）
   
-- **FR-1.2**: 複数の結晶構造をバッチ処理できる
+- **FR-1.2**: **ホモ結晶のための分子-結晶データセットペアリング**
+  - 分子データセット: 単分子のxyz座標情報（ASE DB形式）
+  - 結晶データセット: 対応する分子性結晶構造（ASE DB形式）
+  - 分子IDによるリンク: 各結晶は構成分子IDを保持
+  - ポリモルフ対応: 同一分子から複数の結晶多形をサポート（1:N関係）
+  
+- **FR-1.3**: **単分子EGNN特徴量の抽出**
+  - 単分子の3D構造からEGNN特徴量を計算
+  - 原子座標、原子種、結合情報の取得
+  - 分子レベルの幾何学的特徴の埋め込み
+  - 既存の単分子生成モデルと同様の特徴量抽出方法を使用
+  
+- **FR-1.4**: 複数の結晶構造をバッチ処理できる
   - 異なるサイズの単位格子に対応
   - 異なる空間群の混在に対応
+  - 異なる構成分子を持つホモ結晶の混在に対応
   
-- **FR-1.3**: 結晶構造の前処理
+- **FR-1.5**: 結晶構造の前処理
   - 単位格子の正規化
   - 非対称単位の抽出（オプション）
   - 原子座標の周期境界条件の適用
+  - 構成分子の同定とEGNN特徴量との対応付け
 
 #### FR-2: モデル学習 (Model Training)
-- **FR-2.1**: 周期境界条件を考慮した距離計算
+- **FR-2.1**: **分子EGNN特徴量の統合**
+  - 単分子のEGNN特徴量を結晶構造の条件付けに使用
+  - 分子レベルの幾何学的情報を結晶生成に反映
+  - 分子内相互作用と分子間相互作用の分離表現
+  - 理論的に正しい特徴量の結合（ヒューリスティックなfallbackは使用しない）
+
+- **FR-2.2**: 周期境界条件を考慮した距離計算
   - 最小イメージ規約（Minimum Image Convention）の実装
   - 周期境界を越えた近傍原子の検出
+  - 分子間相互作用の正確な計算
   
-- **FR-2.2**: 格子パラメータの学習
+- **FR-2.3**: 格子パラメータの学習
   - 単位格子の形状（a, b, c, α, β, γ）の同時生成
   - 格子パラメータの物理的制約の適用
+  - 分子サイズと格子サイズの整合性保証
   
-- **FR-2.3**: E(3)等変性の拡張
+- **FR-2.4**: E(3)等変性の拡張
   - 周期性を保持した等変変換
   - 格子変換に対する共変性
+  - 分子内座標と結晶座標の整合的な変換
   
-- **FR-2.4**: 条件付き生成
+- **FR-2.5**: 条件付き生成
+  - **分子EGNN特徴量での条件付け（主要）**
   - 空間群での条件付け
   - 密度での条件付け
   - 格子定数での条件付け
-  - 分子特性での条件付け
+  - 分子特性での条件付け（双極子モーメント、分極率など）
 
 #### FR-3: サンプル生成 (Sample Generation)
 - **FR-3.1**: 結晶構造の生成
@@ -131,13 +155,91 @@ atoms.info = {
 }
 ```
 
-#### 2.1.2 データセット構造
+#### 2.1.2 ホモ結晶のための分子-結晶データセット構造
+
+**重要**: ホモ結晶生成のため、**分子データセットと結晶データセットを分離して管理**します。
+
 ```
-database.db (ASE database)
+データセット構造 (Dataset Structure):
+
+molecules.db (ASE database - 単分子)
+├── Molecule_0001 (Atoms object, xyz coordinates, no pbc)
+│   ├── positions: 3D coordinates
+│   ├── atomic_numbers: atom types
+│   └── info: {'molecule_id': '0001', 'smiles': ..., ...}
+├── Molecule_0002
+└── ...
+
+crystals.db (ASE database - 分子性結晶)
+├── Crystal_0001 (Atoms object with cell and pbc)
+│   ├── positions: crystal structure
+│   ├── cell: unit cell vectors
+│   ├── pbc: [True, True, True]
+│   └── info: {
+│       'crystal_id': '0001',
+│       'molecule_id': '0001',  # ← Link to molecule
+│       'polymorph_id': 'A',    # ← For polymorphs
+│       'space_group': 14,
+│       ...
+│   }
+├── Crystal_0002 (same molecule, different polymorph)
+│   └── info: {
+│       'crystal_id': '0002',
+│       'molecule_id': '0001',  # ← Same molecule
+│       'polymorph_id': 'B',    # ← Different polymorph
+│       ...
+│   }
+├── Crystal_0003 (different molecule)
+│   └── info: {
+│       'molecule_id': '0002',  # ← Different molecule
+│       ...
+│   }
+└── ...
+
+分子-結晶リンク情報 (Molecule-Crystal Mapping):
+molecule_crystal_map.json
+{
+  "0001": {
+    "molecule_id": "0001",
+    "crystal_ids": ["0001", "0002"],  # Multiple polymorphs
+    "polymorphs": {
+      "A": "0001",
+      "B": "0002"
+    }
+  },
+  "0002": {
+    "molecule_id": "0002",
+    "crystal_ids": ["0003"],
+    ...
+  },
+  ...
+}
+```
+
+**データセット要件**:
+1. **分子データセット**: 単分子の3D構造（xyz座標）
+   - 既存の単分子生成モデルと同じ形式
+   - EGNN特徴量抽出に使用
+   - 周期境界条件なし（pbc = False）
+
+2. **結晶データセット**: 対応する分子性結晶構造
+   - 周期境界条件あり（pbc = True）
+   - 単位格子パラメータを含む
+   - 分子IDによるリンク情報を必ず保持
+
+3. **1分子: N結晶の関係**:
+   - 同一分子から複数の結晶多形（ポリモルフ）が存在可能
+   - polymorph_idで区別
+   - 各ポリモルフは異なる空間群や格子パラメータを持つ可能性
+
+#### 2.1.3 標準データセット構造
+```
+database.db (統合ASE database - 推奨しない旧形式)
 ├── Structure 1 (Atoms object with cell and pbc)
 ├── Structure 2 (Atoms object with cell and pbc)
 └── ...
 ```
+注: この形式も後方互換性のためサポートしますが、分子EGNN特徴量を使用しない簡易モードとなります。
 
 ### 2.2 内部データ表現
 
@@ -161,10 +263,43 @@ crystal_data = {
     'space_group': torch.LongTensor,    # [1] - 空間群番号
     'n_atoms': int,                     # 単位格子内の原子数
     'n_molecules': int,                 # 単位格子内の分子数（Z値）
+    
+    # ★ ホモ結晶のための追加フィールド ★
+    'molecule_id': str,                 # 構成分子のID
+    'molecule_features': torch.Tensor,  # [feature_dim] - 単分子EGNN特徴量
+    'polymorph_id': str,                # ポリモルフ識別子（オプション）
 }
 ```
 
-#### 2.2.2 座標系の定義
+#### 2.2.2 単分子EGNN特徴量の表現
+```python
+molecule_features = {
+    # 単分子の幾何学的特徴（EGNNから抽出）
+    'node_features': torch.Tensor,      # [n_mol_atoms, node_dim] - 原子レベル特徴
+    'global_features': torch.Tensor,    # [global_dim] - 分子レベル特徴
+    
+    # 分子の3D構造情報
+    'mol_positions': torch.Tensor,      # [n_mol_atoms, 3] - 分子内原子座標
+    'mol_atom_types': torch.LongTensor, # [n_mol_atoms] - 分子内原子種
+    
+    # 分子の幾何学的性質
+    'mol_size': torch.Tensor,           # [3] - 分子の大まかなサイズ (x, y, z)
+    'mol_volume': torch.Tensor,         # [1] - 分子の体積
+    'principal_axes': torch.Tensor,     # [3, 3] - 主軸方向
+    
+    # グラフ表現
+    'edge_index': torch.LongTensor,     # [2, n_edges] - 分子内結合
+    'edge_features': torch.Tensor,      # [n_edges, edge_dim] - エッジ特徴
+}
+```
+
+**特徴量抽出の流れ**:
+1. molecules.dbから単分子の3D構造を読み込み
+2. 既存の単分子EGNNモデル（または事前学習済みエンコーダ）で特徴量を抽出
+3. グローバルプーリングで分子レベルの特徴ベクトルを生成
+4. 結晶生成モデルの条件付けベクトルとして使用
+
+#### 2.2.3 座標系の定義
 - **分数座標 (Fractional Coordinates)**: 単位格子ベクトルを基底とした座標系（0〜1の範囲）
   - 利点: 格子変形に対して不変
   - 使用場面: 格子パラメータの変更時
@@ -205,10 +340,27 @@ r_frac = cell_vectors^(-1) @ r_cart
 │                     データ入力層                              │
 │  (Data Input Layer)                                         │
 ├─────────────────────────────────────────────────────────────┤
-│  • ASE Database Loader                                      │
+│  • ASE Database Loader (Molecules + Crystals)              │
+│  • Molecule-Crystal Mapping Handler                        │
 │  • Crystal Structure Parser                                 │
 │  • Periodic Boundary Handler                                │
 │  • Space Group Processor                                    │
+└─────────────────────────────────────────────────────────────┘
+                ↓                               ↓
+    ┌───────────────────┐           ┌───────────────────┐
+    │ Molecule Dataset  │           │ Crystal Dataset   │
+    │ (molecules.db)    │           │ (crystals.db)     │
+    │ xyz coordinates   │←──Link────│ + molecule_id     │
+    └───────────────────┘           └───────────────────┘
+                ↓                               ↓
+┌─────────────────────────────────────────────────────────────┐
+│              単分子EGNN特徴量抽出層（新規）                    │
+│  (Molecular EGNN Feature Extraction Layer - NEW)           │
+├─────────────────────────────────────────────────────────────┤
+│  • Molecular EGNN Encoder (pre-trained or on-the-fly)      │
+│  • Molecular Graph Construction                             │
+│  • Geometric Feature Extraction                             │
+│  • Global Pooling for Molecular Features                    │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -219,6 +371,7 @@ r_frac = cell_vectors^(-1) @ r_cart
 │  • Cell Normalizer                                          │
 │  • Minimum Image Calculator                                 │
 │  • Symmetry Analyzer (optional)                            │
+│  • Molecular Feature Conditioning                           │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐

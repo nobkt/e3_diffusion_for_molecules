@@ -3,9 +3,9 @@
 
 ## 📌 はじめに (Getting Started)
 
-このドキュメントパッケージは、E(3)等変拡散モデル(EDM)を**分子性結晶の生成**に拡張するための包括的な仕様と設計を提供します。
+このドキュメントパッケージは、E(3)等変拡散モデル(EDM)を**ホモ結晶（同一分子からなる分子性結晶）の生成**に拡張するための包括的な仕様と設計を提供します。重要な特徴として、**単分子のEGNN特徴量を結晶生成モデルに統合**することで、分子の構造情報を活用した理論的に正しい結晶生成を実現します。
 
-This documentation package provides comprehensive specifications and design for extending the E(3) Equivariant Diffusion Model (EDM) to support **molecular crystal generation**.
+This documentation package provides comprehensive specifications and design for extending the E(3) Equivariant Diffusion Model (EDM) to support **homocrystal generation (molecular crystals composed of identical molecules)**. A key feature is the **integration of single-molecule EGNN features into the crystal generation model**, enabling theoretically sound crystal generation that leverages molecular structural information.
 
 ---
 

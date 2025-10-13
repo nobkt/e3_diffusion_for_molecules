@@ -1,9 +1,9 @@
 # 分子性結晶生成への拡張 - ドキュメント概要
 # Molecular Crystal Generation Extension - Documentation Overview
 
-このドキュメントパッケージは、E(3)等変拡散モデル(EDM)を分子性結晶の生成に拡張するための包括的な仕様と設計を提供します。
+このドキュメントパッケージは、E(3)等変拡散モデル(EDM)を**ホモ結晶（同一分子からなる分子性結晶）**の生成に拡張するための包括的な仕様と設計を提供します。**単分子のEGNN特徴量を結晶生成に統合**することで、理論的に正しい結晶生成を実現します。
 
-This documentation package provides comprehensive specifications and design for extending the E(3) Equivariant Diffusion Model (EDM) to support molecular crystal generation.
+This documentation package provides comprehensive specifications and design for extending the E(3) Equivariant Diffusion Model (EDM) to support **homocrystal generation (molecular crystals composed of identical molecules)**. By **integrating single-molecule EGNN features**, we achieve theoretically sound crystal generation.
 
 ---
 
@@ -133,22 +133,37 @@ This documentation package provides comprehensive specifications and design for 
 
 ## 🎯 主要な技術的特徴 (Key Technical Features)
 
-### 1. 周期境界条件のサポート
+### 1. ホモ結晶生成のための分子-結晶統合 ★NEW★
+- **分離データセット**: molecules.db（単分子）+ crystals.db（結晶）の明確な分離
+- **molecule_idリンク**: 理論的に正しい分子-結晶対応関係
+- **ポリモルフ対応**: 1分子:N結晶の関係をネイティブサポート
+- **ヒューリスティック不使用**: fallbackなしの厳格な実装
+
+### 2. 単分子EGNN特徴量の統合 ★PRIMARY FEATURE★
+- **MolecularEncoder**: 単分子からEGNN特徴量を自動抽出
+- **幾何学的特徴**: 分子サイズ、体積、主軸方向の計算
+- **MolecularConditioning**: 分子特徴量を結晶生成の主要条件として使用
+- **事前学習済みモデル**: 既存の単分子EGNNを再利用可能
+
+### 3. 周期境界条件のサポート
 - **最小イメージ規約**: 周期境界を越えた原子間距離を正確に計算
 - **周期的近傍リスト**: カットオフ半径内の全ての周期イメージを考慮
 - **分数座標系**: 格子変形に対して不変な座標表現
 
-### 2. 格子パラメータの学習
+### 4. 格子パラメータの学習
 - **独立した拡散プロセス**: 原子座標とは異なるスケールと制約を持つ格子パラメータを別途処理
 - **物理的制約**: 正の長さ、妥当な角度範囲を保証
 - **正規化戦略**: log空間での長さ、sin/cos表現での角度
+- **分子サイズとの整合性**: 分子特徴量から格子サイズを推定
 
-### 3. E(3)等変性の拡張
+### 5. E(3)等変性の拡張
 - **周期的EGNN**: 既存のEGNNを周期系に拡張
 - **格子共変性**: 格子変換に対して共変な層の導入
 - **相対座標の使用**: 並進不変性の保持
+- **分子内・分子間相互作用の分離**: 理論的に正しい相互作用表現
 
-### 4. 条件付き生成
+### 6. 条件付き生成
+- **★ 分子EGNN特徴量（PRIMARY）**: 単分子の構造情報による条件付け
 - **空間群**: 230種類の空間群による条件付け
 - **密度**: 結晶密度による条件付け
 - **格子パラメータ**: 特定の格子定数での生成

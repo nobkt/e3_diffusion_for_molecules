@@ -3,9 +3,9 @@
 
 ## 概要 (Overview)
 
-本設計書は、E(3)等変拡散モデルを分子性結晶生成に拡張するための詳細な実装設計を提供します。既存のコードベースに最小限の変更で統合できるよう、モジュール構造と実装の詳細を定義します。
+本設計書は、E(3)等変拡散モデルを**ホモ結晶（同一分子からなる分子性結晶）**の生成に拡張するための詳細な実装設計を提供します。**単分子のEGNN特徴量を結晶生成に統合**することで、分子の構造情報を活用した理論的に正しい結晶生成を実現します。既存のコードベースに最小限の変更で統合できるよう、モジュール構造と実装の詳細を定義します。
 
-This design document provides detailed implementation specifications for extending the E(3) Equivariant Diffusion Model to support molecular crystal generation. The design ensures minimal modifications to the existing codebase through a modular architecture.
+This design document provides detailed implementation specifications for extending the E(3) Equivariant Diffusion Model to support **homocrystal generation (molecular crystals composed of identical molecules)**. By **integrating single-molecule EGNN features into crystal generation**, we achieve theoretically sound crystal generation that leverages molecular structural information. The design ensures minimal modifications to the existing codebase through a modular architecture.
 
 ---
 
@@ -23,21 +23,26 @@ e3_diffusion_for_molecules/
 │
 ├── crystal/                                # [新規] 結晶専用モジュール
 │   ├── __init__.py                         # モジュール初期化
+│   │
 │   ├── data/                               # データ処理
 │   │   ├── __init__.py
-│   │   ├── crystal_loader.py               # 結晶データローダー
+│   │   ├── molecule_loader.py              # ★NEW: 単分子データローダー
+│   │   ├── crystal_loader.py               # 結晶データローダー (molecule_id連携)
+│   │   ├── molecule_crystal_mapper.py      # ★NEW: 分子-結晶マッピング管理
 │   │   ├── periodic_utils.py               # 周期境界条件ユーティリティ
 │   │   ├── coordinate_transform.py         # 座標変換（分数↔デカルト）
 │   │   └── symmetry_handler.py             # 空間群・対称性処理
 │   │
 │   ├── models/                             # モデル拡張
 │   │   ├── __init__.py
-│   │   ├── periodic_egnn.py                # 周期的EGNN
+│   │   ├── molecular_encoder.py            # ★NEW: 単分子EGNN特徴量エンコーダ
+│   │   ├── periodic_egnn.py                # 周期的EGNN (molecular features conditioned)
 │   │   ├── lattice_diffusion.py            # 格子パラメータ拡散
-│   │   └── crystal_dynamics.py             # 結晶構造拡散統合モデル
+│   │   └── crystal_dynamics.py             # 結晶構造拡散統合モデル (with mol features)
 │   │
 │   ├── conditioning/                        # 条件付けモジュール
 │   │   ├── __init__.py
+│   │   ├── molecular_conditioning.py        # ★NEW: 分子特徴量条件付け (PRIMARY)
 │   │   ├── space_group_embedding.py        # 空間群埋め込み
 │   │   ├── density_conditioning.py         # 密度条件付け
 │   │   └── lattice_conditioning.py         # 格子パラメータ条件付け
@@ -67,17 +72,274 @@ e3_diffusion_for_molecules/
 ├── sample_crystal.py                       # [新規] 結晶サンプリングスクリプト
 │
 └── tests/                                  # テスト
+    ├── test_molecule_loader.py            # [新規] 分子ローダーテスト
     ├── test_crystal_loader.py              # [新規] データローダーテスト
+    ├── test_mol_crys_mapper.py             # [新規] マッピングテスト
+    ├── test_molecular_encoder.py           # [新規] 分子エンコーダテスト
     ├── test_periodic_utils.py              # [新規] 周期性テスト
     ├── test_periodic_egnn.py               # [新規] モデルテスト
     └── test_crystal_integration.py         # [新規] 統合テスト
 ```
 
+**★ 新規追加モジュール (ホモ結晶対応)**:
+- `crystal/data/molecule_loader.py`: 単分子データの読み込み
+- `crystal/data/molecule_crystal_mapper.py`: 分子IDと結晶IDのマッピング管理
+- `crystal/models/molecular_encoder.py`: 単分子EGNN特徴量エンコーダ
+- `crystal/conditioning/molecular_conditioning.py`: 分子特徴量による条件付け
+
 ---
 
 ## 2. データ処理層の設計 (Data Processing Layer Design)
 
-### 2.1 結晶データローダー (Crystal Data Loader)
+### 2.0 分子-結晶データセット統合アーキテクチャ
+
+**重要**: ホモ結晶生成では、分子データセットと結晶データセットを**理論的に正しく**統合します。
+
+```
+データフロー (Data Flow):
+
+molecules.db ─┐
+               ├─→ MoleculeCrystalMapper ─→ 統合データセット
+crystals.db ─┘
+
+1. 分子ローダー: molecules.dbから単分子のxyz座標を読み込み
+2. 結晶ローダー: crystals.dbから結晶構造+molecule_idを読み込み
+3. マッパー: molecule_idでリンクし、分子特徴量を結晶に紐付け
+```
+
+### 2.1 単分子データローダー (Molecule Data Loader)
+
+#### ファイル: `crystal/data/molecule_loader.py`
+
+```python
+"""
+単分子データをASEデータベースから読み込み
+"""
+
+import torch
+import numpy as np
+from ase.db import connect
+from typing import Dict, List, Optional
+from torch.utils.data import Dataset
+
+
+class MoleculeDataset(Dataset):
+    """
+    単分子データセット
+    
+    既存の単分子生成モデルと同じ形式で分子データを読み込み
+    EGNN特徴量抽出の入力として使用
+    """
+    
+    def __init__(
+        self,
+        db_path: str,
+        indices: Optional[List[int]] = None,
+        remove_h: bool = False,
+    ):
+        """
+        Args:
+            db_path: 分子データベースのパス (molecules.db)
+            indices: 使用するデータのインデックスリスト (Noneの場合は全て)
+            remove_h: 水素原子を除去するか
+        """
+        self.db_path = db_path
+        self.remove_h = remove_h
+        
+        # データベース接続
+        self.db = connect(db_path)
+        
+        # インデックス設定
+        if indices is None:
+            self.indices = list(range(1, len(self.db) + 1))
+        else:
+            self.indices = [i + 1 for i in indices]  # ASE DBは1-indexed
+        
+        # 原子種の辞書を構築
+        self._build_atom_encoder()
+    
+    def _build_atom_encoder(self):
+        """データセット全体をスキャンして原子種辞書を構築"""
+        all_atomic_numbers = set()
+        
+        for idx in self.indices:
+            row = self.db.get(idx)
+            atoms = row.toatoms()
+            all_atomic_numbers.update(atoms.numbers)
+        
+        sorted_atomic_numbers = sorted(all_atomic_numbers)
+        self.atom_encoder = {num: i for i, num in enumerate(sorted_atomic_numbers)}
+        self.atom_decoder = sorted_atomic_numbers
+        self.num_atom_types = len(self.atom_decoder)
+    
+    def __len__(self):
+        return len(self.indices)
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """
+        単一の分子を取得
+        
+        Returns:
+            data: 以下のキーを含む辞書
+                - positions: [n_atoms, 3] 分子内原子座標
+                - atom_types: [n_atoms] 原子種インデックス
+                - one_hot: [n_atoms, num_atom_types] ワンホット表現
+                - molecule_id: 分子ID（文字列またはint）
+                - num_atoms: [1] 原子数
+        """
+        # データベースから取得
+        db_idx = self.indices[idx]
+        row = self.db.get(db_idx)
+        atoms = row.toatoms()
+        
+        # 分子IDを取得 (info, key-value, またはidから)
+        if hasattr(row, 'molecule_id'):
+            molecule_id = row.molecule_id
+        elif hasattr(row, 'data') and 'molecule_id' in row.data:
+            molecule_id = row.data['molecule_id']
+        elif hasattr(row, 'key_value_pairs') and 'molecule_id' in row.key_value_pairs:
+            molecule_id = row.key_value_pairs['molecule_id']
+        else:
+            # フォールバックとしてDB IDを使用 (推奨されない)
+            molecule_id = str(db_idx)
+        
+        # 水素除去
+        if self.remove_h:
+            mask = atoms.numbers != 1
+            atoms = atoms[mask]
+        
+        # 座標取得
+        positions = torch.tensor(atoms.positions, dtype=torch.float32)
+        
+        # 原子種情報
+        atomic_numbers = atoms.numbers
+        atom_types = torch.tensor(
+            [self.atom_encoder[num] for num in atomic_numbers],
+            dtype=torch.long
+        )
+        
+        # ワンホット表現
+        one_hot = torch.zeros(len(atoms), self.num_atom_types, dtype=torch.float32)
+        one_hot.scatter_(1, atom_types.unsqueeze(1), 1.0)
+        
+        data = {
+            'positions': positions,
+            'atom_types': atom_types,
+            'one_hot': one_hot,
+            'molecule_id': molecule_id,
+            'num_atoms': torch.tensor([len(atoms)], dtype=torch.long),
+        }
+        
+        return data
+```
+
+### 2.2 分子-結晶マッピング管理 (Molecule-Crystal Mapper)
+
+#### ファイル: `crystal/data/molecule_crystal_mapper.py`
+
+```python
+"""
+分子IDと結晶IDのマッピングを管理
+"""
+
+import json
+from typing import Dict, List, Optional
+from pathlib import Path
+
+
+class MoleculeCrystalMapper:
+    """
+    分子-結晶の対応関係を管理するクラス
+    
+    molecule_crystal_map.jsonを読み込み、
+    molecule_id → crystal_ids の対応を管理
+    """
+    
+    def __init__(self, map_file_path: Optional[str] = None):
+        """
+        Args:
+            map_file_path: マッピングファイルのパス (JSON)
+                            Noneの場合は動的に構築
+        """
+        self.map_file_path = map_file_path
+        self.mol_to_crystals: Dict[str, List[str]] = {}
+        self.crystal_to_mol: Dict[str, str] = {}
+        
+        if map_file_path and Path(map_file_path).exists():
+            self._load_mapping(map_file_path)
+    
+    def _load_mapping(self, map_file_path: str):
+        """JSONファイルからマッピングを読み込み"""
+        with open(map_file_path, 'r') as f:
+            data = json.load(f)
+        
+        for mol_id, mol_data in data.items():
+            crystal_ids = mol_data.get('crystal_ids', [])
+            self.mol_to_crystals[mol_id] = crystal_ids
+            
+            for crys_id in crystal_ids:
+                self.crystal_to_mol[crys_id] = mol_id
+    
+    def build_from_databases(
+        self,
+        molecule_db_path: str,
+        crystal_db_path: str
+    ):
+        """
+        データベースから動的にマッピングを構築
+        
+        crystals.dbの各エントリのmolecule_id情報を使用
+        """
+        from ase.db import connect
+        
+        crystal_db = connect(crystal_db_path)
+        
+        for row in crystal_db.select():
+            # 結晶IDを取得
+            if hasattr(row, 'crystal_id'):
+                crystal_id = row.crystal_id
+            elif hasattr(row, 'data') and 'crystal_id' in row.data:
+                crystal_id = row.data['crystal_id']
+            else:
+                crystal_id = str(row.id)
+            
+            # 分子IDを取得
+            if hasattr(row, 'molecule_id'):
+                molecule_id = row.molecule_id
+            elif hasattr(row, 'data') and 'molecule_id' in row.data:
+                molecule_id = row.data['molecule_id']
+            else:
+                raise ValueError(f"Crystal {crystal_id} has no molecule_id")
+            
+            # マッピングに追加
+            if molecule_id not in self.mol_to_crystals:
+                self.mol_to_crystals[molecule_id] = []
+            self.mol_to_crystals[molecule_id].append(crystal_id)
+            self.crystal_to_mol[crystal_id] = molecule_id
+    
+    def get_crystals_for_molecule(self, molecule_id: str) -> List[str]:
+        """指定された分子に対応する結晶IDリストを取得"""
+        return self.mol_to_crystals.get(molecule_id, [])
+    
+    def get_molecule_for_crystal(self, crystal_id: str) -> Optional[str]:
+        """指定された結晶に対応する分子IDを取得"""
+        return self.crystal_to_mol.get(crystal_id)
+    
+    def save_mapping(self, output_path: str):
+        """マッピングをJSONファイルに保存"""
+        data = {}
+        for mol_id, crys_ids in self.mol_to_crystals.items():
+            data[mol_id] = {
+                'molecule_id': mol_id,
+                'crystal_ids': crys_ids,
+                'num_polymorphs': len(crys_ids)
+            }
+        
+        with open(output_path, 'w') as f:
+            json.dump(data, f, indent=2)
+```
+
+### 2.3 結晶データローダー (Crystal Data Loader)
 
 #### ファイル: `crystal/data/crystal_loader.py`
 
@@ -95,15 +357,18 @@ from torch.utils.data import Dataset
 
 class CrystalDataset(Dataset):
     """
-    分子性結晶データセット
+    分子性結晶データセット (ホモ結晶対応)
     
     ASE Atomsオブジェクトを内部表現に変換し、バッチ処理可能な形式で提供
+    molecule_idによる分子データとの連携をサポート
     """
     
     def __init__(
         self,
         db_path: str,
         indices: List[int],
+        molecule_dataset: Optional['MoleculeDataset'] = None,
+        molecule_crystal_mapper: Optional['MoleculeCrystalMapper'] = None,
         remove_h: bool = False,
         use_fractional_coords: bool = True,
         cutoff_radius: float = 10.0,
@@ -112,8 +377,10 @@ class CrystalDataset(Dataset):
     ):
         """
         Args:
-            db_path: ASEデータベースのパス
+            db_path: ASEデータベースのパス (crystals.db)
             indices: 使用するデータのインデックスリスト
+            molecule_dataset: 単分子データセット (オプション)
+            molecule_crystal_mapper: 分子-結晶マッパー (オプション)
             remove_h: 水素原子を除去するか
             use_fractional_coords: 分数座標を使用するか（Falseの場合はデカルト座標）
             cutoff_radius: 近傍計算のカットオフ半径（Å）
@@ -122,6 +389,8 @@ class CrystalDataset(Dataset):
         """
         self.db_path = db_path
         self.indices = indices
+        self.molecule_dataset = molecule_dataset
+        self.molecule_crystal_mapper = molecule_crystal_mapper
         self.remove_h = remove_h
         self.use_fractional_coords = use_fractional_coords
         self.cutoff_radius = cutoff_radius
@@ -133,6 +402,9 @@ class CrystalDataset(Dataset):
         
         # 原子種の辞書を構築
         self._build_atom_encoder()
+        
+        # 分子データのキャッシュ (効率化のため)
+        self.molecule_cache: Dict[str, Dict] = {}
         
     def _build_atom_encoder(self):
         """データセット全体をスキャンして原子種辞書を構築"""
@@ -716,6 +988,229 @@ def cell_vectors_to_params(cell_vectors: torch.Tensor) -> torch.Tensor:
 ---
 
 ## 3. モデル層の設計 (Model Layer Design)
+
+### 3.0 単分子EGNN特徴量エンコーダ (Molecular EGNN Feature Encoder)
+
+#### ファイル: `crystal/models/molecular_encoder.py`
+
+```python
+"""
+単分子のEGNN特徴量を抽出するエンコーダ
+"""
+
+import torch
+import torch.nn as nn
+from typing import Dict, Optional
+from egnn.egnn_new import EGNN  # 既存のEGNNを再利用
+
+
+class MolecularEncoder(nn.Module):
+    """
+    単分子からEGNN特徴量を抽出
+    
+    既存の単分子EGNNモデルを使用して、
+    分子レベルの幾何学的特徴を抽出
+    """
+    
+    def __init__(
+        self,
+        in_node_nf: int,
+        hidden_nf: int = 128,
+        n_layers: int = 4,
+        global_feature_dim: int = 128,
+        attention: bool = True,
+        pretrained_path: Optional[str] = None,
+    ):
+        """
+        Args:
+            in_node_nf: ノード特徴量の入力次元（原子種のone-hot次元）
+            hidden_nf: 隠れ層の次元
+            n_layers: EGNNレイヤー数
+            global_feature_dim: グローバル特徴量の出力次元
+            attention: アテンションを使用するか
+            pretrained_path: 事前学習済みモデルのパス（オプション）
+        """
+        super().__init__()
+        
+        self.in_node_nf = in_node_nf
+        self.hidden_nf = hidden_nf
+        self.global_feature_dim = global_feature_dim
+        
+        # 単分子EGNN（既存モデルを再利用）
+        self.molecular_egnn = EGNN(
+            in_node_nf=in_node_nf,
+            hidden_nf=hidden_nf,
+            out_node_nf=hidden_nf,
+            in_edge_nf=0,
+            n_layers=n_layers,
+            attention=attention,
+            normalize=False,
+            tanh=False,
+        )
+        
+        # グローバルプーリング後の特徴変換
+        self.global_mlp = nn.Sequential(
+            nn.Linear(hidden_nf, hidden_nf),
+            nn.SiLU(),
+            nn.Linear(hidden_nf, global_feature_dim),
+        )
+        
+        # 分子の幾何学的性質を計算するためのヘッド
+        self.geometry_head = nn.Sequential(
+            nn.Linear(hidden_nf, hidden_nf // 2),
+            nn.SiLU(),
+            nn.Linear(hidden_nf // 2, 16),  # size(3) + volume(1) + principal_axes(9) + padding(3)
+        )
+        
+        # 事前学習済みモデルの読み込み
+        if pretrained_path is not None:
+            self.load_pretrained(pretrained_path)
+    
+    def forward(
+        self,
+        h: torch.Tensor,
+        x: torch.Tensor,
+        node_mask: Optional[torch.Tensor] = None,
+        extract_geometry: bool = True,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        単分子からEGNN特徴量を抽出
+        
+        Args:
+            h: [batch, n_atoms, in_node_nf] ノード特徴量（原子種のone-hot）
+            x: [batch, n_atoms, 3] 原子座標
+            node_mask: [batch, n_atoms] ノードマスク
+            extract_geometry: 幾何学的性質も抽出するか
+            
+        Returns:
+            features: 以下のキーを含む辞書
+                - node_features: [batch, n_atoms, hidden_nf] 原子レベル特徴
+                - global_features: [batch, global_feature_dim] 分子レベル特徴
+                - mol_size: [batch, 3] 分子サイズ（オプション）
+                - mol_volume: [batch, 1] 分子体積（オプション）
+                - principal_axes: [batch, 3, 3] 主軸（オプション）
+        """
+        batch_size, n_atoms, _ = h.shape
+        
+        # 完全結合グラフを構築（分子内は周期境界なし）
+        # 簡略化のため、ここでは全結合とする
+        # 実際の実装では、分子グラフ（結合情報）を使用すべき
+        edge_index = self._build_fully_connected_edges(n_atoms, batch_size, h.device)
+        
+        # EGNNを通して特徴量を抽出
+        node_features, _ = self.molecular_egnn(
+            h=h,
+            x=x,
+            edge_index=edge_index,
+            node_mask=node_mask,
+        )
+        
+        # グローバルプーリング（平均プーリング）
+        if node_mask is not None:
+            # マスクを考慮したプーリング
+            masked_features = node_features * node_mask.unsqueeze(-1)
+            global_features = masked_features.sum(dim=1) / node_mask.sum(dim=1, keepdim=True)
+        else:
+            global_features = node_features.mean(dim=1)
+        
+        # グローバル特徴量の変換
+        global_features = self.global_mlp(global_features)
+        
+        features = {
+            'node_features': node_features,
+            'global_features': global_features,
+        }
+        
+        # 幾何学的性質の抽出（オプション）
+        if extract_geometry:
+            geometry = self.geometry_head(global_features)
+            
+            # 分子サイズ（x, y, z方向の広がり）
+            mol_size = torch.abs(geometry[:, :3])  # [batch, 3]
+            
+            # 分子体積（近似）
+            mol_volume = torch.abs(geometry[:, 3:4])  # [batch, 1]
+            
+            # 主軸方向（9要素を3x3行列に変換）
+            principal_axes_flat = geometry[:, 4:13]  # [batch, 9]
+            principal_axes = principal_axes_flat.view(batch_size, 3, 3)
+            
+            # 直交化（Gram-Schmidt）
+            principal_axes = self._orthogonalize(principal_axes)
+            
+            features.update({
+                'mol_size': mol_size,
+                'mol_volume': mol_volume,
+                'principal_axes': principal_axes,
+            })
+        
+        return features
+    
+    def _build_fully_connected_edges(
+        self,
+        n_atoms: int,
+        batch_size: int,
+        device: torch.device
+    ) -> torch.Tensor:
+        """完全結合グラフのエッジを構築"""
+        # 各バッチで全結合
+        src = torch.arange(n_atoms, device=device).repeat(n_atoms)
+        dst = torch.arange(n_atoms, device=device).repeat_interleave(n_atoms)
+        
+        # 自己ループを除外
+        mask = src != dst
+        src = src[mask]
+        dst = dst[mask]
+        
+        edge_index = torch.stack([src, dst], dim=0)
+        
+        # バッチ対応（簡略化のため、ここでは最初のバッチのみ）
+        # 実際の実装では、全バッチ分のエッジを作成する必要がある
+        return edge_index
+    
+    def _orthogonalize(self, matrices: torch.Tensor) -> torch.Tensor:
+        """
+        Gram-Schmidtによる直交化
+        
+        Args:
+            matrices: [batch, 3, 3]
+            
+        Returns:
+            orthogonal_matrices: [batch, 3, 3]
+        """
+        v1 = matrices[:, 0, :]  # [batch, 3]
+        v2 = matrices[:, 1, :]
+        v3 = matrices[:, 2, :]
+        
+        # v1を正規化
+        u1 = v1 / (torch.norm(v1, dim=-1, keepdim=True) + 1e-8)
+        
+        # v2からu1の成分を除去して正規化
+        u2 = v2 - (torch.sum(v2 * u1, dim=-1, keepdim=True) * u1)
+        u2 = u2 / (torch.norm(u2, dim=-1, keepdim=True) + 1e-8)
+        
+        # v3からu1とu2の成分を除去して正規化
+        u3 = v3 - (torch.sum(v3 * u1, dim=-1, keepdim=True) * u1) - (torch.sum(v3 * u2, dim=-1, keepdim=True) * u2)
+        u3 = u3 / (torch.norm(u3, dim=-1, keepdim=True) + 1e-8)
+        
+        # [batch, 3, 3]に再構成
+        orthogonal = torch.stack([u1, u2, u3], dim=1)
+        
+        return orthogonal
+    
+    def load_pretrained(self, pretrained_path: str):
+        """事前学習済みEGNNモデルを読み込み"""
+        checkpoint = torch.load(pretrained_path, map_location='cpu')
+        
+        # EGNNの重みのみを読み込み
+        egnn_state_dict = {}
+        for key, value in checkpoint.items():
+            if key.startswith('molecular_egnn.'):
+                egnn_state_dict[key.replace('molecular_egnn.', '')] = value
+        
+        self.molecular_egnn.load_state_dict(egnn_state_dict, strict=False)
+        print(f"Loaded pretrained molecular EGNN from {pretrained_path}")
+```
 
 ### 3.1 周期的EGNN (Periodic EGNN)
 
@@ -1342,6 +1837,226 @@ class CrystalDynamics(nn.Module):
 ---
 
 ## 4. 条件付けモジュールの設計 (Conditioning Module Design)
+
+### 4.0 分子特徴量条件付け (Molecular Feature Conditioning) ★PRIMARY★
+
+#### ファイル: `crystal/conditioning/molecular_conditioning.py`
+
+```python
+"""
+単分子EGNN特徴量を用いた条件付け（主要な条件付けモジュール）
+"""
+
+import torch
+import torch.nn as nn
+from typing import Dict, Optional
+
+
+class MolecularConditioning(nn.Module):
+    """
+    単分子のEGNN特徴量を結晶生成の条件付けに使用
+    
+    これはホモ結晶生成における**最も重要な条件付けモジュール**です。
+    分子の構造情報を結晶生成に直接反映させます。
+    """
+    
+    def __init__(
+        self,
+        molecular_feature_dim: int = 128,
+        conditioning_dim: int = 256,
+        use_geometry: bool = True,
+    ):
+        """
+        Args:
+            molecular_feature_dim: 分子特徴量の入力次元
+            conditioning_dim: 条件付けベクトルの出力次元
+            use_geometry: 幾何学的性質（サイズ、体積など）も使用するか
+        """
+        super().__init__()
+        
+        self.molecular_feature_dim = molecular_feature_dim
+        self.conditioning_dim = conditioning_dim
+        self.use_geometry = use_geometry
+        
+        # 分子グローバル特徴量の処理
+        input_dim = molecular_feature_dim
+        
+        if use_geometry:
+            # 幾何学的性質も含める
+            # size(3) + volume(1) + principal_axes(9) = 13
+            input_dim += 13
+        
+        # 特徴量変換MLP
+        self.feature_mlp = nn.Sequential(
+            nn.Linear(input_dim, conditioning_dim),
+            nn.LayerNorm(conditioning_dim),
+            nn.SiLU(),
+            nn.Linear(conditioning_dim, conditioning_dim),
+            nn.LayerNorm(conditioning_dim),
+            nn.SiLU(),
+            nn.Linear(conditioning_dim, conditioning_dim),
+        )
+        
+        # 追加の射影層（オプション）
+        self.projection = nn.Linear(conditioning_dim, conditioning_dim)
+    
+    def forward(
+        self,
+        molecular_features: Dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        """
+        分子特徴量を条件付けベクトルに変換
+        
+        Args:
+            molecular_features: MolecularEncoderから得られた特徴量辞書
+                - global_features: [batch, molecular_feature_dim]
+                - mol_size: [batch, 3] (オプション)
+                - mol_volume: [batch, 1] (オプション)
+                - principal_axes: [batch, 3, 3] (オプション)
+                
+        Returns:
+            conditioning_vector: [batch, conditioning_dim]
+        """
+        # グローバル特徴量を取得
+        global_feat = molecular_features['global_features']
+        
+        features_to_concat = [global_feat]
+        
+        # 幾何学的性質を追加
+        if self.use_geometry and 'mol_size' in molecular_features:
+            mol_size = molecular_features['mol_size']  # [batch, 3]
+            mol_volume = molecular_features['mol_volume']  # [batch, 1]
+            principal_axes = molecular_features['principal_axes']  # [batch, 3, 3]
+            
+            # 主軸をフラット化
+            principal_axes_flat = principal_axes.view(principal_axes.shape[0], -1)  # [batch, 9]
+            
+            features_to_concat.extend([
+                mol_size,
+                mol_volume,
+                principal_axes_flat,
+            ])
+        
+        # 全ての特徴量を連結
+        combined_features = torch.cat(features_to_concat, dim=-1)
+        
+        # MLPで変換
+        conditioning_vector = self.feature_mlp(combined_features)
+        
+        # 射影
+        conditioning_vector = self.projection(conditioning_vector)
+        
+        return conditioning_vector
+
+
+class CombinedConditioning(nn.Module):
+    """
+    複数の条件付けモジュールを統合
+    
+    分子特徴量を主軸としつつ、空間群や密度などの
+    他の条件も組み合わせる
+    """
+    
+    def __init__(
+        self,
+        molecular_conditioning: MolecularConditioning,
+        space_group_embedding: Optional[nn.Module] = None,
+        density_conditioning: Optional[nn.Module] = None,
+        conditioning_dim: int = 256,
+    ):
+        """
+        Args:
+            molecular_conditioning: 分子条件付けモジュール（必須）
+            space_group_embedding: 空間群埋め込み（オプション）
+            density_conditioning: 密度条件付け（オプション）
+            conditioning_dim: 統合後の条件付けベクトル次元
+        """
+        super().__init__()
+        
+        self.molecular_conditioning = molecular_conditioning
+        self.space_group_embedding = space_group_embedding
+        self.density_conditioning = density_conditioning
+        self.conditioning_dim = conditioning_dim
+        
+        # 統合のための重み学習
+        num_conditions = 1  # 分子条件は必須
+        if space_group_embedding is not None:
+            num_conditions += 1
+        if density_conditioning is not None:
+            num_conditions += 1
+        
+        # 各条件の重み（学習可能）
+        self.condition_weights = nn.Parameter(
+            torch.ones(num_conditions) / num_conditions
+        )
+        
+        # 統合MLP
+        self.fusion_mlp = nn.Sequential(
+            nn.Linear(conditioning_dim, conditioning_dim),
+            nn.LayerNorm(conditioning_dim),
+            nn.SiLU(),
+            nn.Linear(conditioning_dim, conditioning_dim),
+        )
+    
+    def forward(
+        self,
+        molecular_features: Dict[str, torch.Tensor],
+        space_group: Optional[torch.Tensor] = None,
+        density: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        複数の条件を統合した条件付けベクトルを生成
+        
+        Args:
+            molecular_features: 分子特徴量（必須）
+            space_group: 空間群番号（オプション）
+            density: 結晶密度（オプション）
+            
+        Returns:
+            combined_conditioning: [batch, conditioning_dim]
+        """
+        # 分子条件（必須）
+        mol_cond = self.molecular_conditioning(molecular_features)
+        
+        conditions = [mol_cond]
+        condition_idx = 0
+        
+        # 空間群条件（オプション）
+        if self.space_group_embedding is not None and space_group is not None:
+            sg_emb = self.space_group_embedding(space_group)
+            # 次元を合わせる
+            if sg_emb.shape[-1] != self.conditioning_dim:
+                sg_emb = nn.functional.pad(
+                    sg_emb,
+                    (0, self.conditioning_dim - sg_emb.shape[-1])
+                )
+            conditions.append(sg_emb)
+            condition_idx += 1
+        
+        # 密度条件（オプション）
+        if self.density_conditioning is not None and density is not None:
+            dens_emb = self.density_conditioning(density)
+            # 次元を合わせる
+            if dens_emb.shape[-1] != self.conditioning_dim:
+                dens_emb = nn.functional.pad(
+                    dens_emb,
+                    (0, self.conditioning_dim - dens_emb.shape[-1])
+                )
+            conditions.append(dens_emb)
+            condition_idx += 1
+        
+        # 重み付き統合
+        weights = torch.softmax(self.condition_weights[:len(conditions)], dim=0)
+        
+        combined = torch.zeros_like(conditions[0])
+        for i, cond in enumerate(conditions):
+            combined = combined + weights[i] * cond
+        
+        # 統合MLP
+        combined_conditioning = self.fusion_mlp(combined)
+        
+        return combined_conditioning
+```
 
 ### 4.1 空間群埋め込み (Space Group Embedding)
 

@@ -3,9 +3,9 @@
 
 ## 🎯 プロジェクト概要 (Project Overview)
 
-このプロジェクトは、既存のE(3)等変拡散モデル(EDM)を**分子性結晶の生成**に拡張するための包括的な仕様と設計を提供します。
+このプロジェクトは、既存のE(3)等変拡散モデル(EDM)を**ホモ結晶（同一分子からなる分子性結晶）の生成**に拡張するための包括的な仕様と設計を提供します。重要な特徴として、**単分子のEGNN特徴量を結晶生成モデルに統合**することで、分子の構造情報を活用した理論的に正しい結晶生成を実現します。
 
-This project provides comprehensive specifications and design for extending the existing E(3) Equivariant Diffusion Model (EDM) to support **molecular crystal generation**.
+This project provides comprehensive specifications and design for extending the existing E(3) Equivariant Diffusion Model (EDM) to support **homocrystal generation (molecular crystals composed of identical molecules)**. A key feature is the **integration of single-molecule EGNN features into the crystal generation model**, enabling theoretically sound crystal generation that leverages molecular structural information.
 
 ---
 
@@ -103,7 +103,35 @@ This project provides comprehensive specifications and design for extending the 
 
 ## 🎯 主要な技術的貢献 (Key Technical Contributions)
 
-### 1. 周期境界条件のサポート (Periodic Boundary Conditions)
+### 1. ホモ結晶生成のための分子-結晶データセット統合 (Molecule-Crystal Dataset Integration for Homocrystals)
+
+**課題**: 既存のEDMは単一分子のみを扱うため、分子性結晶の生成には不十分。
+
+**解決策**:
+- **分離データセット**: molecules.db（単分子）+ crystals.db（結晶）
+- **molecule_idによるリンク**: 理論的に正しい対応関係の管理
+- **ポリモルフ対応**: 1分子:N結晶の関係をネイティブサポート
+- **ヒューリスティック不使用**: fallbackなしの厳格な実装
+
+**実装場所**: `crystal/data/molecule_loader.py`, `crystal/data/molecule_crystal_mapper.py`
+
+---
+
+### 2. 単分子EGNN特徴量の統合 (Single-Molecule EGNN Feature Integration)
+
+**課題**: 結晶生成時に構成分子の構造情報を活用する必要がある。
+
+**解決策**:
+- **MolecularEncoder**: 単分子のxyz座標からEGNN特徴量を抽出
+- **幾何学的特徴**: 分子サイズ、体積、主軸方向を計算
+- **MolecularConditioning**: 分子特徴量を結晶生成の主要条件として使用
+- **事前学習済みモデル対応**: 既存の単分子EGNNモデルを再利用可能
+
+**実装場所**: `crystal/models/molecular_encoder.py`, `crystal/conditioning/molecular_conditioning.py`
+
+---
+
+### 3. 周期境界条件のサポート (Periodic Boundary Conditions)
 
 **課題**: 既存のEDMはユークリッド空間を前提としており、周期性のあるトーラス空間には対応していない。
 
@@ -116,7 +144,7 @@ This project provides comprehensive specifications and design for extending the 
 
 ---
 
-### 2. 格子パラメータの学習 (Lattice Parameter Learning)
+### 4. 格子パラメータの学習 (Lattice Parameter Learning)
 
 **課題**: 格子パラメータ (a, b, c, α, β, γ) は原子座標とは異なるスケールと制約を持つ。
 
@@ -142,9 +170,10 @@ This project provides comprehensive specifications and design for extending the 
 
 ---
 
-### 4. 条件付き生成 (Conditional Generation)
+### 5. 条件付き生成 (Conditional Generation)
 
 **新機能**:
+- **★ 分子EGNN特徴量（PRIMARY）**: 単分子の構造情報を結晶生成に反映
 - **空間群**: 230種類の空間群による条件付け
 - **密度**: 結晶密度による条件付け
 - **格子パラメータ**: 特定の格子定数での生成
@@ -227,14 +256,66 @@ Week 10-11: Integration & Testing (統合とテスト)
 
 ### データローダー:
 ```python
-# 詳細: MOLECULAR_CRYSTAL_DESIGN.md Section 2.1
+# 詳細: MOLECULAR_CRYSTAL_DESIGN.md Section 2.1-2.3
+from crystal.data.molecule_loader import MoleculeDataset
 from crystal.data.crystal_loader import CrystalDataset
+from crystal.data.molecule_crystal_mapper import MoleculeCrystalMapper
 
-dataset = CrystalDataset(
+# 分子データセット
+molecule_dataset = MoleculeDataset(
+    db_path='molecules.db',
+    remove_h=False,
+)
+
+# マッパー
+mapper = MoleculeCrystalMapper()
+mapper.build_from_databases('molecules.db', 'crystals.db')
+
+# 結晶データセット（分子データと連携）
+crystal_dataset = CrystalDataset(
     db_path='crystals.db',
     indices=[0, 1, 2, ...],
+    molecule_dataset=molecule_dataset,
+    molecule_crystal_mapper=mapper,
     use_fractional_coords=True,
 )
+```
+
+### 分子EGNN特徴量抽出:
+```python
+# 詳細: MOLECULAR_CRYSTAL_DESIGN.md Section 3.0
+from crystal.models.molecular_encoder import MolecularEncoder
+
+encoder = MolecularEncoder(
+    in_node_nf=num_atom_types,
+    hidden_nf=128,
+    global_feature_dim=128,
+    pretrained_path='pretrained_molecule_egnn.pt'  # オプション
+)
+
+# 分子特徴量を抽出
+molecular_features = encoder(
+    h=molecule_one_hot,  # [batch, n_atoms, num_types]
+    x=molecule_positions,  # [batch, n_atoms, 3]
+    node_mask=molecule_mask
+)
+# Returns: global_features, mol_size, mol_volume, principal_axes
+```
+
+### 分子特徴量条件付け:
+```python
+# 詳細: MOLECULAR_CRYSTAL_DESIGN.md Section 4.0
+from crystal.conditioning.molecular_conditioning import MolecularConditioning
+
+mol_cond = MolecularConditioning(
+    molecular_feature_dim=128,
+    conditioning_dim=256,
+    use_geometry=True
+)
+
+# 分子特徴量を条件付けベクトルに変換
+conditioning_vector = mol_cond(molecular_features)
+# [batch, 256]
 ```
 
 ### 最小イメージ距離:
