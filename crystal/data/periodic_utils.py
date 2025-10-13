@@ -90,17 +90,19 @@ def cartesian_to_fractional(
     Convert Cartesian coordinates to fractional coordinates
     
     Args:
-        positions_cart: [..., 3] - Cartesian coordinates
+        positions_cart: [..., n_atoms, 3] or [..., 3] - Cartesian coordinates
         cell_vectors: [..., 3, 3] - Unit cell vectors
         
     Returns:
-        positions_frac: [..., 3] - Fractional coordinates
+        positions_frac: [..., n_atoms, 3] or [..., 3] - Fractional coordinates
     """
-    # cell^(-1) @ positions_cart = positions_frac
-    positions_cart_expanded = positions_cart.unsqueeze(-1)
+    # cell^(-1) @ positions_cart^T = positions_frac^T
+    # So: positions_frac = positions_cart @ cell^(-T)
     cell_inv = torch.linalg.inv(cell_vectors)
-    positions_frac = torch.matmul(cell_inv, positions_cart_expanded)
-    positions_frac = positions_frac.squeeze(-1)
+    
+    # positions_cart [..., n_atoms, 3] @ cell_inv [..., 3, 3]^T
+    # Result: [..., n_atoms, 3]
+    positions_frac = torch.matmul(positions_cart, cell_inv.transpose(-2, -1))
     
     return positions_frac
 
@@ -113,16 +115,18 @@ def fractional_to_cartesian(
     Convert fractional coordinates to Cartesian coordinates
     
     Args:
-        positions_frac: [..., 3] - Fractional coordinates
+        positions_frac: [..., n_atoms, 3] or [..., 3] - Fractional coordinates
         cell_vectors: [..., 3, 3] - Unit cell vectors
         
     Returns:
-        positions_cart: [..., 3] - Cartesian coordinates
+        positions_cart: [..., n_atoms, 3] or [..., 3] - Cartesian coordinates
     """
-    # cell @ positions_frac = positions_cart
-    positions_frac_expanded = positions_frac.unsqueeze(-1)
-    positions_cart = torch.matmul(cell_vectors, positions_frac_expanded)
-    positions_cart = positions_cart.squeeze(-1)
+    # cell @ positions_frac^T = positions_cart^T
+    # So: positions_cart = positions_frac @ cell^T
+    
+    # positions_frac [..., n_atoms, 3] @ cell_vectors [..., 3, 3]^T
+    # Result: [..., n_atoms, 3]
+    positions_cart = torch.matmul(positions_frac, cell_vectors.transpose(-2, -1))
     
     return positions_cart
 
