@@ -337,6 +337,16 @@ def setup_models(args, device, dataset_info, molecule_dataset=None):
         ).to(device)
         conditioning_modules['molecular'] = mol_cond
         context_node_nf = args.conditioning_dim
+    else:
+        # If using space group or density without molecular features,
+        # we need CombinedConditioning to handle the fusion
+        if args.condition_on_space_group or args.condition_on_density:
+            # Create a dummy molecular conditioning for combined fusion
+            # Note: This is a limitation - CombinedConditioning requires molecular features
+            raise NotImplementedError(
+                "Space group and density conditioning currently require molecular "
+                "conditioning to be enabled. Set --condition_on_molecule True."
+            )
     
     if args.condition_on_space_group:
         sg_emb = SpaceGroupEmbedding(
@@ -387,7 +397,6 @@ def main():
     """Main training loop."""
     # Setup
     device = torch.device('cuda' if torch.cuda.is_available() and not args.no_cuda else 'cpu')
-    dtype = torch.float32
     
     print(f"Using device: {device}")
     print(f"Arguments: {args}")
@@ -411,38 +420,86 @@ def main():
     structure_validator = StructureValidator()
     cif_writer = CIFWriter(dataset_info) if args.save_cif else None
     
+    # Create output directories
+    output_dir = Path('outputs') / args.exp_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir = output_dir / 'checkpoints'
+    checkpoint_dir.mkdir(exist_ok=True)
+    
+    if args.save_cif:
+        if args.cif_output_dir is None:
+            cif_output_dir = output_dir / 'cif'
+        else:
+            cif_output_dir = Path(args.cif_output_dir)
+        cif_output_dir.mkdir(parents=True, exist_ok=True)
+    
     # Training loop
     best_val_loss = float('inf')
+    
+    print("\n" + "="*50)
+    print("IMPORTANT NOTE: This is a training script template.")
+    print("The actual training loop requires adaptation of train_epoch() and test()")
+    print("functions from train_test.py to handle crystal data with periodic boundaries.")
+    print("="*50 + "\n")
     
     for epoch in range(args.start_epoch, args.n_epochs):
         print(f"\nEpoch {epoch+1}/{args.n_epochs}")
         start_time = time.time()
         
         # Training
-        # Note: train_epoch needs to be adapted for crystal data
-        # For now, this is a placeholder
-        print("Training epoch...")
-        # train_loss = train_epoch(...)
+        # TODO: Implement crystal-specific training loop
+        # This requires adapting train_epoch() to handle:
+        # - Periodic boundary conditions
+        # - Cell parameter learning
+        # - Molecular feature conditioning
+        # - Multiple conditioning types
+        print("Training epoch... (template - needs implementation)")
+        
+        # Placeholder: Would call adapted train_epoch here
+        # train_loss = train_epoch_crystal(
+        #     args, dataloaders['train'], epoch, model, device,
+        #     mol_encoder, conditioning_modules, optim, ...
+        # )
         
         # Validation
         if epoch % args.test_epochs == 0:
-            print("Validating...")
-            # val_loss = test(...)
+            print("Validating... (template - needs implementation)")
             
-            # Save best model
+            # Placeholder: Would call adapted test here
+            # val_loss = test_crystal(
+            #     args, dataloaders['valid'], epoch, ema_model, device, ...
+            # )
+            
+            # Save checkpoint
             if args.save_model:
-                checkpoint_path = join(args.exp_name, f'checkpoint_epoch{epoch}.pt')
+                checkpoint_path = checkpoint_dir / f'checkpoint_epoch{epoch:04d}.pt'
+                print(f"Saving checkpoint to {checkpoint_path}")
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optim.state_dict(),
+                    'mol_encoder_state_dict': mol_encoder.state_dict() if mol_encoder else None,
+                    'conditioning_modules': {k: v.state_dict() for k, v in conditioning_modules.items()},
+                    'best_val_loss': best_val_loss,
                     'args': args
                 }, checkpoint_path)
+                
+                # Save best model separately
+                # if val_loss < best_val_loss:
+                #     best_val_loss = val_loss
+                #     best_model_path = checkpoint_dir / 'best_model.pt'
+                #     torch.save(model.state_dict(), best_model_path)
         
         epoch_time = time.time() - start_time
         print(f"Epoch time: {epoch_time:.2f}s")
     
-    print("\nTraining completed!")
+    print("\n" + "="*50)
+    print("Training loop template completed.")
+    print("To use this script for actual training, implement:")
+    print("1. train_epoch_crystal() - crystal-specific training")
+    print("2. test_crystal() - crystal-specific validation")
+    print("3. Adapt conditioning preparation for crystal data")
+    print("="*50)
     wandb.finish()
 
 
