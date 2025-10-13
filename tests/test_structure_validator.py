@@ -388,6 +388,11 @@ class TestValidateStructure:
             [0.0, 0.0, 0.0],
             [0.1, 0.0, 0.0],
         ])
+        # Update fractional coordinates to match
+        crystal['positions_frac'] = torch.tensor([
+            [0.0, 0.0, 0.0],
+            [0.02, 0.0, 0.0],
+        ])
         
         validator = StructureValidator(strict_mode=False)
         
