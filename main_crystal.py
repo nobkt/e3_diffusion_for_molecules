@@ -36,7 +36,7 @@ from equivariant_diffusion.utils import assert_correctly_masked
 from equivariant_diffusion import utils as flow_utils
 from qm9.models import get_optim
 from qm9.utils import compute_mean_mad
-from train_test import train_epoch, test
+from train_test_crystal import train_epoch_crystal, test_crystal, analyze_and_save_crystal
 
 # Crystal-specific imports
 from crystal.data.crystal_loader import CrystalDataset, collate_crystal_batch
@@ -415,10 +415,24 @@ def main():
         args, device, dataset_info, molecule_dataset
     )
     
+    # DataParallel wrapper
+    if args.dp and torch.cuda.device_count() > 1:
+        model_dp = torch.nn.DataParallel(model)
+    else:
+        model_dp = model
+    
     # Setup evaluation tools
     crystal_metrics = CrystalMetrics(dataset_info)
     structure_validator = StructureValidator()
     cif_writer = CIFWriter(dataset_info) if args.save_cif else None
+    
+    # Setup gradient norm queue
+    gradnorm_queue = utils.Queue()
+    gradnorm_queue.add(3000)  # Add large value that will be flushed
+    
+    # Nodes distribution (for sampling)
+    # TODO: For crystals, this should be adapted based on crystal size distribution
+    nodes_dist = None  # Placeholder for now
     
     # Create output directories
     output_dir = Path('outputs') / args.exp_name
@@ -435,11 +449,10 @@ def main():
     
     # Training loop
     best_val_loss = float('inf')
+    dtype = torch.float32
     
     print("\n" + "="*50)
-    print("IMPORTANT NOTE: This is a training script template.")
-    print("The actual training loop requires adaptation of train_epoch() and test()")
-    print("functions from train_test.py to handle crystal data with periodic boundaries.")
+    print("Starting crystal-specific training loop")
     print("="*50 + "\n")
     
     for epoch in range(args.start_epoch, args.n_epochs):
@@ -447,28 +460,61 @@ def main():
         start_time = time.time()
         
         # Training
-        # TODO: Implement crystal-specific training loop
-        # This requires adapting train_epoch() to handle:
-        # - Periodic boundary conditions
-        # - Cell parameter learning
-        # - Molecular feature conditioning
-        # - Multiple conditioning types
-        print("Training epoch... (template - needs implementation)")
-        
-        # Placeholder: Would call adapted train_epoch here
-        # train_loss = train_epoch_crystal(
-        #     args, dataloaders['train'], epoch, model, device,
-        #     mol_encoder, conditioning_modules, optim, ...
-        # )
+        train_epoch_crystal(
+            args=args,
+            loader=dataloaders['train'],
+            epoch=epoch,
+            model=model,
+            model_dp=model_dp,
+            model_ema=ema_model,
+            ema=ema,
+            device=device,
+            dtype=dtype,
+            mol_encoder=mol_encoder,
+            conditioning_modules=conditioning_modules,
+            optim=optim,
+            nodes_dist=nodes_dist,
+            gradnorm_queue=gradnorm_queue,
+            dataset_info=dataset_info
+        )
         
         # Validation
         if epoch % args.test_epochs == 0:
-            print("Validating... (template - needs implementation)")
+            print("\nValidating...")
+            val_loss = test_crystal(
+                args=args,
+                loader=dataloaders['valid'],
+                epoch=epoch,
+                eval_model=ema_model,
+                device=device,
+                dtype=dtype,
+                mol_encoder=mol_encoder,
+                conditioning_modules=conditioning_modules,
+                nodes_dist=nodes_dist,
+                partition='Val'
+            )
             
-            # Placeholder: Would call adapted test here
-            # val_loss = test_crystal(
-            #     args, dataloaders['valid'], epoch, ema_model, device, ...
-            # )
+            print(f"Validation NLL: {val_loss:.2f}")
+            wandb.log({"Val NLL": val_loss}, commit=True)
+            
+            # Analyze and save structures
+            if args.validate_structures:
+                print("\nAnalyzing generated structures...")
+                metrics = analyze_and_save_crystal(
+                    epoch=epoch,
+                    model_sample=ema_model,
+                    nodes_dist=nodes_dist,
+                    args=args,
+                    device=device,
+                    dataset_info=dataset_info,
+                    crystal_metrics=crystal_metrics,
+                    structure_validator=structure_validator,
+                    cif_writer=cif_writer,
+                    mol_encoder=mol_encoder,
+                    conditioning_modules=conditioning_modules,
+                    n_samples=args.n_stability_samples,
+                    batch_size=10
+                )
             
             # Save checkpoint
             if args.save_model:
@@ -485,20 +531,20 @@ def main():
                 }, checkpoint_path)
                 
                 # Save best model separately
-                # if val_loss < best_val_loss:
-                #     best_val_loss = val_loss
-                #     best_model_path = checkpoint_dir / 'best_model.pt'
-                #     torch.save(model.state_dict(), best_model_path)
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_model_path = checkpoint_dir / 'best_model.pt'
+                    print(f"New best model! Saving to {best_model_path}")
+                    torch.save(model.state_dict(), best_model_path)
+                    if mol_encoder is not None:
+                        torch.save(mol_encoder.state_dict(), checkpoint_dir / 'best_mol_encoder.pt')
         
         epoch_time = time.time() - start_time
         print(f"Epoch time: {epoch_time:.2f}s")
     
     print("\n" + "="*50)
-    print("Training loop template completed.")
-    print("To use this script for actual training, implement:")
-    print("1. train_epoch_crystal() - crystal-specific training")
-    print("2. test_crystal() - crystal-specific validation")
-    print("3. Adapt conditioning preparation for crystal data")
+    print("Training completed!")
+    print(f"Best validation NLL: {best_val_loss:.2f}")
     print("="*50)
     wandb.finish()
 
