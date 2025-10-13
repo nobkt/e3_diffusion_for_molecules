@@ -22,6 +22,12 @@ from typing import Optional, Dict, Any, Tuple
 from equivariant_diffusion.utils import assert_correctly_masked
 import utils
 from qm9 import losses
+from crystal.sampling import (
+    sample_crystal,
+    sample_crystal_chain,
+    validate_and_save_crystal,
+    sample_different_crystal_sizes
+)
 
 
 def prepare_crystal_context(
@@ -404,37 +410,73 @@ def analyze_and_save_crystal(
     batch_size = min(batch_size, n_samples)
     assert n_samples % batch_size == 0
     
-    crystals = []
     valid_count = 0
+    error_reasons = {}
     
-    for i in range(int(n_samples / batch_size)):
-        # Sample number of nodes
-        nodesxsample = nodes_dist.sample(batch_size)
+    # Sample crystals of different sizes
+    try:
+        crystals = sample_different_crystal_sizes(
+            model=model_sample,
+            nodes_dist=nodes_dist,
+            args=args,
+            device=device,
+            dataset_info=dataset_info,
+            mol_encoder=mol_encoder,
+            conditioning_modules=conditioning_modules,
+            n_samples=n_samples,
+            batch_size=batch_size
+        )
         
-        # TODO: Implement crystal sampling function
-        # This requires adapting sample() from qm9/sampling.py to handle:
-        # - Periodic boundary conditions
-        # - Cell parameters
-        # - Fractional coordinates
-        # - Molecular conditioning
-        
-        print(f"Crystal sampling not yet implemented. Placeholder for batch {i+1}/{int(n_samples/batch_size)}")
-        
-        # Placeholder structure for now
-        # In actual implementation, would call:
-        # crystal = sample_crystal(args, device, model_sample, dataset_info, ...)
-        # Then validate and save
+        # Validate each crystal
+        if len(crystals.get('one_hot', [])) > 0:
+            for i in range(crystals['one_hot'].size(0)):
+                crystal_data = {
+                    'positions': crystals['x'][i],
+                    'one_hot': crystals['one_hot'][i],
+                    'cell_params': crystals['cell'][i],  # Need to convert from vectors
+                    'node_mask': crystals['node_mask'][i]
+                }
+                
+                # Validate
+                is_valid, errors = validate_and_save_crystal(
+                    crystal=crystal_data,
+                    structure_validator=structure_validator,
+                    cif_writer=cif_writer if args.save_cif else None,
+                    save_path=f'outputs/{args.exp_name}/epoch_{epoch}/crystal_{i}.cif' if args.save_cif and is_valid else None
+                )
+                
+                if is_valid:
+                    valid_count += 1
+                else:
+                    # Track error reasons
+                    for error_type, error_val in errors.items():
+                        if error_val:  # If error is True or non-zero
+                            error_reasons[error_type] = error_reasons.get(error_type, 0) + 1
+        else:
+            print("Note: Sampling not yet fully implemented, using placeholder metrics")
+    
+    except NotImplementedError as e:
+        print(f"Sampling not yet implemented: {e}")
+        print("Returning placeholder metrics")
     
     # Compute metrics
     metrics = {
-        'validity_ratio': valid_count / n_samples,
+        'validity_ratio': valid_count / n_samples if n_samples > 0 else 0.0,
         'n_samples': n_samples,
         'n_valid': valid_count
     }
+    
+    # Add error breakdown
+    for error_type, count in error_reasons.items():
+        metrics[f'error_{error_type}'] = count / n_samples
     
     # Log to wandb
     wandb.log(metrics)
     
     print(f"Validity: {metrics['validity_ratio']:.2%} ({valid_count}/{n_samples})")
+    if error_reasons:
+        print("Error breakdown:")
+        for error_type, count in error_reasons.items():
+            print(f"  {error_type}: {count}/{n_samples} ({count/n_samples:.2%})")
     
     return metrics
