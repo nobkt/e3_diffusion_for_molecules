@@ -2,9 +2,12 @@ from equivariant_diffusion import utils
 import numpy as np
 import math
 import torch
-from egnn import models
+from typing import TYPE_CHECKING
 from torch.nn import functional as F
 from equivariant_diffusion import utils as diffusion_utils
+
+if TYPE_CHECKING:
+    from egnn import models
 
 
 # Defining some useful util functions.
@@ -255,7 +258,7 @@ class EnVariationalDiffusion(torch.nn.Module):
     """
     def __init__(
             self,
-            dynamics: models.EGNN_dynamics_QM9, in_node_nf: int, n_dims: int,
+            dynamics: 'models.EGNN_dynamics_QM9', in_node_nf: int, n_dims: int,
             timesteps: int = 1000, parametrization='eps', noise_schedule='learned',
             noise_precision=1e-4, loss_type='vlb', norm_values=(1., 1., 1.),
             norm_biases=(None, 0., 0.), include_charges=True):
