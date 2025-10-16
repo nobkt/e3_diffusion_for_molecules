@@ -66,7 +66,7 @@ This will:
 - ✓ Load config from `args.pickle`
 - ✓ Resume from epoch 200 automatically
 - ✓ Continue training to epoch 500
-- ✓ Save to `outputs/exp_cond_molecular_descriptors_resume` (note: the experiment name has `_resume` suffix appended by line 177 in main_qm9.py)
+- ✓ Save to `outputs/exp_cond_molecular_descriptors_resume` (note: the experiment name has `_resume` suffix appended in the args loading section of main_qm9.py)
 
 ## Key Features
 
