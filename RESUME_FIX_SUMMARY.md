@@ -66,7 +66,7 @@ This will:
 - ✓ Load config from `args.pickle`
 - ✓ Resume from epoch 200 automatically
 - ✓ Continue training to epoch 500
-- ✓ Save to `outputs/exp_cond_molecular_descriptors_resume`
+- ✓ Save to `outputs/exp_cond_molecular_descriptors_resume` (note: the experiment name has `_resume` suffix appended by line 177 in main_qm9.py)
 
 ## Key Features
 
@@ -115,26 +115,27 @@ The fix maintains full backward compatibility:
 
 ## Code Changes Summary
 
-**Before:**
-```python
-# Old code (broken)
-flow_state_dict = torch.load(join(args.resume, 'flow.npy'))
-optim_state_dict = torch.load(join(args.resume, 'optim.npy'))
-model.load_state_dict(flow_state_dict)
-optim.load_state_dict(optim_state_dict)
-```
+**Key Issue Fixed:**
+The original code in `main_qm9.py` (lines 272-276) tried to load from hardcoded filenames:
+- `flow.npy` (which doesn't exist - models are saved as `generative_model.npy`)
+- Always expected both model and optimizer to exist (no graceful fallback)
 
-**After:**
+**Fix Applied:**
+Enhanced the model loading logic (lines 297-341) to:
+1. Support both directory and file path for `--resume`
+2. Try multiple filenames in priority order
+3. Gracefully handle missing optimizer state
+4. Provide clear error messages
+
 ```python
-# New code (robust)
+# Robust file detection and loading
 if os.path.isdir(args.resume):
-    # Try multiple file names in priority order
     if os.path.exists(join(resume_dir, 'generative_model_ema.npy')):
         model_path = join(resume_dir, 'generative_model_ema.npy')
     elif os.path.exists(join(resume_dir, 'generative_model.npy')):
         model_path = join(resume_dir, 'generative_model.npy')
     elif os.path.exists(join(resume_dir, 'flow.npy')):
-        model_path = join(resume_dir, 'flow.npy')
+        model_path = join(resume_dir, 'flow.npy')  # Backward compatibility
     else:
         raise FileNotFoundError(...)
 
@@ -174,27 +175,4 @@ All changes have been tested:
 - ✅ Backward compatibility verified
 - ✅ Works with existing checkpoints
 
-## User Answer
-
-To the user's question in Japanese:
-
-> main_qm9.pyでaseのdbに対して下記コマンドで条件付き学習を200エポック行いましたが、
-> 学習がまだ不十分だったため、途中結果からrestartして継続して訓練を行いたいですが、
-> その方法を教えてください。
-
-**Answer:**
-
-```bash
-python main_qm9.py \
-    --exp_name exp_cond_molecular_descriptors \
-    --resume outputs/exp_cond_molecular_descriptors \
-    --n_epochs 500 \
-    --no_wandb
-```
-
-このコマンドで：
-- エポック200から自動的に再開されます
-- エポック500まで学習が継続されます
-- すべての設定が自動的に読み込まれます
-
-詳細は `RESUME_TRAINING_JA.md` をご覧ください。
+The fix enables users to resume training from checkpoints with a simple command. See `RESUME_TRAINING.md` and `RESUME_TRAINING_JA.md` for detailed usage instructions.
