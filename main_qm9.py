@@ -171,6 +171,9 @@ device = torch.device("cuda" if args.cuda else "cpu")
 dtype = torch.float32
 
 if args.resume is not None:
+    import os
+    
+    # Store command-line arguments that should override saved args
     exp_name = args.exp_name + '_resume'
     start_epoch = args.start_epoch
     resume = args.resume
@@ -178,15 +181,37 @@ if args.resume is not None:
     normalization_factor = args.normalization_factor
     aggregation_method = args.aggregation_method
 
-    with open(join(args.resume, 'args.pickle'), 'rb') as f:
-        args = pickle.load(f)
+    # Determine where to load args.pickle from
+    if os.path.isdir(args.resume):
+        args_path = join(args.resume, 'args.pickle')
+    else:
+        # If resume is a file, look for args.pickle in the same directory
+        args_path = join(os.path.dirname(args.resume), 'args.pickle')
+    
+    # Load saved arguments
+    if os.path.exists(args_path):
+        print(f"Loading arguments from {args_path}")
+        with open(args_path, 'rb') as f:
+            args = pickle.load(f)
+    else:
+        print(f"Warning: No args.pickle found at {args_path}. Using current arguments.")
 
     args.resume = resume
     args.break_train_epoch = False
-
     args.exp_name = exp_name
-    args.start_epoch = start_epoch
     args.wandb_usr = wandb_usr
+
+    # Handle start_epoch: Use the saved current_epoch if start_epoch was not explicitly set
+    # (start_epoch default is 0, so we check if it was explicitly provided)
+    if start_epoch == 0 and hasattr(args, 'current_epoch'):
+        # Use the epoch from the checkpoint
+        args.start_epoch = args.current_epoch
+        print(f"Resuming from epoch {args.start_epoch} (from checkpoint)")
+    else:
+        # Use the explicitly provided start_epoch
+        args.start_epoch = start_epoch
+        if start_epoch > 0:
+            print(f"Resuming from epoch {args.start_epoch} (from command line)")
 
     # Careful with this -->
     if not hasattr(args, 'normalization_factor'):
@@ -194,6 +219,7 @@ if args.resume is not None:
     if not hasattr(args, 'aggregation_method'):
         args.aggregation_method = aggregation_method
 
+    print(f"Resume configuration: exp_name={args.exp_name}, start_epoch={args.start_epoch}")
     print(args)
 
 utils.create_folders(args)
@@ -270,10 +296,49 @@ def check_mask_correct(variables, node_mask):
 
 def main():
     if args.resume is not None:
-        flow_state_dict = torch.load(join(args.resume, 'flow.npy'))
-        optim_state_dict = torch.load(join(args.resume, 'optim.npy'))
+        import os
+        # Support both directory path and file path for resume argument
+        if os.path.isdir(args.resume):
+            # If resume is a directory, look for model files in it
+            resume_dir = args.resume
+            
+            # Try to load EMA model first (usually better), then regular model
+            if os.path.exists(join(resume_dir, 'generative_model_ema.npy')):
+                model_path = join(resume_dir, 'generative_model_ema.npy')
+                print(f"Loading EMA model from {model_path}")
+            elif os.path.exists(join(resume_dir, 'generative_model.npy')):
+                model_path = join(resume_dir, 'generative_model.npy')
+                print(f"Loading model from {model_path}")
+            elif os.path.exists(join(resume_dir, 'flow.npy')):
+                # Backward compatibility with old naming
+                model_path = join(resume_dir, 'flow.npy')
+                print(f"Loading model from {model_path} (old format)")
+            else:
+                raise FileNotFoundError(
+                    f"No model checkpoint found in {resume_dir}. "
+                    f"Expected generative_model_ema.npy, generative_model.npy, or flow.npy"
+                )
+            
+            optim_path = join(resume_dir, 'optim.npy')
+        else:
+            # If resume is a file path, use it directly for the model
+            model_path = args.resume
+            # Try to find optimizer in the same directory
+            resume_dir = os.path.dirname(args.resume)
+            optim_path = join(resume_dir, 'optim.npy')
+            print(f"Loading model from {model_path}")
+        
+        # Load model state
+        flow_state_dict = torch.load(model_path)
         model.load_state_dict(flow_state_dict)
-        optim.load_state_dict(optim_state_dict)
+        
+        # Load optimizer state if available
+        if os.path.exists(optim_path):
+            print(f"Loading optimizer state from {optim_path}")
+            optim_state_dict = torch.load(optim_path)
+            optim.load_state_dict(optim_state_dict)
+        else:
+            print(f"Warning: Optimizer state not found at {optim_path}. Starting with fresh optimizer.")
 
     # Initialize dataparallel if enabled and possible.
     if args.dp and torch.cuda.device_count() > 1:

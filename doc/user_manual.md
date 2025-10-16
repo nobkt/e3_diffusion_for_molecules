@@ -229,12 +229,91 @@ python main_qm9.py \
 
 ### Resuming Training
 
+You can resume training from a saved checkpoint. The script automatically loads the model, optimizer state, and training arguments from the checkpoint.
+
+#### Option 1: Resume from checkpoint directory (Recommended)
+
 ```bash
 python main_qm9.py \
     --exp_name my_model \
-    --resume outputs/my_model/generative_model.npy \
-    --start_epoch 100
+    --resume outputs/my_model
 ```
+
+**What this does**:
+- Loads model from `generative_model_ema.npy` (preferred) or `generative_model.npy`
+- Loads optimizer state from `optim.npy`
+- Loads training arguments from `args.pickle`
+- Automatically resumes from the epoch saved in the checkpoint
+- Creates a new experiment named `my_model_resume`
+
+#### Option 2: Resume from specific model file
+
+```bash
+python main_qm9.py \
+    --exp_name my_model \
+    --resume outputs/my_model/generative_model_ema.npy
+```
+
+**Note**: The script will look for `args.pickle` and `optim.npy` in the same directory.
+
+#### Option 3: Resume from specific epoch
+
+If you want to override the saved epoch and start from a specific epoch:
+
+```bash
+python main_qm9.py \
+    --exp_name my_model \
+    --resume outputs/my_model \
+    --start_epoch 150
+```
+
+**Use case**: Useful when you want to continue training beyond the saved epoch or restart from an earlier point.
+
+#### Example: Resume conditional training on ASE database
+
+For the specific command mentioned in the problem statement:
+
+```bash
+# Original training command (stopped at epoch 200)
+python main_qm9.py \
+    --exp_name exp_cond_molecular_descriptors \
+    --model egnn_dynamics \
+    --lr 1e-4 \
+    --nf 256 \
+    --n_layers 9 \
+    --save_model True \
+    --diffusion_steps 1000 \
+    --sin_embedding False \
+    --n_epochs 200 \
+    --n_stability_samples 1000 \
+    --diffusion_noise_schedule polynomial_2 \
+    --diffusion_noise_precision 1e-5 \
+    --dequantization deterministic \
+    --include_charges False \
+    --diffusion_loss_type l2 \
+    --batch_size 16 \
+    --conditioning molecular_weight pi_conjugation_ratio atom_types_encoding functional_groups_encoding \
+    --dataset ase_db \
+    --ase_db_path ase.db \
+    --test_epochs 10 \
+    --no_wandb
+
+# Resume training for another 300 epochs (total 500 epochs)
+python main_qm9.py \
+    --exp_name exp_cond_molecular_descriptors \
+    --resume outputs/exp_cond_molecular_descriptors \
+    --n_epochs 500 \
+    --no_wandb
+```
+
+**Important Notes**:
+- Most training parameters (model architecture, learning rate, etc.) are loaded from the checkpoint
+- You can override `--n_epochs` to train for more epochs
+- The new experiment will be saved as `exp_cond_molecular_descriptors_resume`
+- Make sure the checkpoint directory exists and contains the necessary files:
+  - `generative_model.npy` or `generative_model_ema.npy` (required)
+  - `optim.npy` (optional, but recommended for optimal training)
+  - `args.pickle` (optional, but recommended to preserve training configuration)
 
 ---
 
