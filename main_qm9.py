@@ -201,6 +201,26 @@ if args.resume is not None:
     args.exp_name = exp_name
     args.wandb_usr = wandb_usr
 
+    # Load saved dataset_info if available to ensure consistent model architecture
+    if os.path.isdir(args.resume):
+        dataset_info_path = join(args.resume, 'dataset_info.pickle')
+    else:
+        dataset_info_path = join(os.path.dirname(args.resume), 'dataset_info.pickle')
+    
+    saved_dataset_info = None
+    if os.path.exists(dataset_info_path):
+        print(f"Loading dataset_info from {dataset_info_path}")
+        with open(dataset_info_path, 'rb') as f:
+            saved_dataset_info = pickle.load(f)
+        # Store the saved atom encoder/decoder to restore later
+        saved_atom_encoder = saved_dataset_info['atom_encoder']
+        saved_atom_decoder = saved_dataset_info['atom_decoder']
+        print(f"Saved dataset has {len(saved_atom_decoder)} atom types: {saved_atom_decoder}")
+    else:
+        print(f"Warning: No dataset_info.pickle found at {dataset_info_path}. Will use current dataset configuration.")
+        saved_atom_encoder = None
+        saved_atom_decoder = None
+
     # Handle start_epoch: Use the saved current_epoch if start_epoch was not explicitly set
     # (start_epoch default is 0, so we check if it was explicitly provided)
     if start_epoch == 0 and hasattr(args, 'current_epoch'):
@@ -238,6 +258,13 @@ wandb.save('*.txt')
 
 # Retrieve QM9 dataloaders
 dataloaders, charge_scale = dataset.retrieve_dataloaders(args)
+
+# Restore saved dataset_info if resuming training
+if args.resume is not None and 'saved_atom_encoder' in dir() and saved_atom_encoder is not None:
+    print(f"Restoring saved atom types to dataset_info to ensure model architecture matches checkpoint")
+    dataset_info['atom_encoder'] = saved_atom_encoder
+    dataset_info['atom_decoder'] = saved_atom_decoder
+    print(f"Restored dataset_info with {len(saved_atom_decoder)} atom types: {saved_atom_decoder}")
 
 # Check if CSV export mode is enabled
 if args.export_conditions_csv is not None:
@@ -415,6 +442,9 @@ def main():
                         utils.save_model(model_ema, 'outputs/%s/generative_model_ema.npy' % args.exp_name)
                     with open('outputs/%s/args.pickle' % args.exp_name, 'wb') as f:
                         pickle.dump(args, f)
+                    # Save dataset_info for resume compatibility
+                    with open('outputs/%s/dataset_info.pickle' % args.exp_name, 'wb') as f:
+                        pickle.dump(dataset_info, f)
 
                 if args.save_model:
                     utils.save_model(optim, 'outputs/%s/optim_%d.npy' % (args.exp_name, epoch))
@@ -423,6 +453,9 @@ def main():
                         utils.save_model(model_ema, 'outputs/%s/generative_model_ema_%d.npy' % (args.exp_name, epoch))
                     with open('outputs/%s/args_%d.pickle' % (args.exp_name, epoch), 'wb') as f:
                         pickle.dump(args, f)
+                    # Save dataset_info for resume compatibility
+                    with open('outputs/%s/dataset_info_%d.pickle' % (args.exp_name, epoch), 'wb') as f:
+                        pickle.dump(dataset_info, f)
             print('Val loss: %.4f \t Test loss:  %.4f' % (nll_val, nll_test))
             print('Best val loss: %.4f \t Best test loss:  %.4f' % (best_nll_val, best_nll_test))
             wandb.log({"Val loss ": nll_val}, commit=True)
