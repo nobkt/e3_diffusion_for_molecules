@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Test script to verify that the circular import issue is fixed.
 This test ensures that the modules can be imported without circular import errors.
