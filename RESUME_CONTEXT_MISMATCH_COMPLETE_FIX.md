@@ -41,19 +41,20 @@ When the database is modified between original training and resume training (e.g
 ### Example Scenario
 
 **Original Training (context_node_nf = 27)**:
-- Database has 7 unique atom types → `atom_types_encoding` = 7 features
-- Database has 17 unique functional groups → `functional_groups_encoding` = 17 features
-- Total: 1 + 1 + 7 + 17 = 26 features... wait, this doesn't add up to 27!
+- Database has certain atom types and functional groups
+- Conditioning features result in 27 total context features
 
-Let me recalculate based on the actual values:
-- If checkpoint has 27 context features
-- And the new database produces 21 context features
-- The difference is 6 features
+**Resume Training (current database)**:
+- Current database produces 21 context features
 
-This could be due to:
-- 6 fewer atom types, OR
-- 6 fewer functional groups, OR
-- A combination of both
+**Difference: 6 features**
+
+This difference could be due to:
+- Fewer unique atom types in the current database (6 fewer atom types), OR
+- Fewer unique functional groups in the current database (6 fewer functional groups), OR  
+- A combination of changes in both atom types and functional groups
+
+The exact breakdown depends on the specific conditioning configuration and database content.
 
 ## Complete Solution
 
@@ -61,7 +62,7 @@ The fix implements three complementary strategies:
 
 ### 1. Save Dataset Configuration (dataset_info)
 
-**Files Modified**: `main_qm9.py` lines 445-447 and 455-457
+**Files Modified**: `main_qm9.py` lines 486-488 and 497-499
 
 ```python
 # Save dataset_info alongside args for resume compatibility
@@ -267,8 +268,12 @@ For `atom_types_encoding` and `functional_groups_encoding`:
    - Lines 204-222: Load saved dataset_info during resume
    - Lines 262-267: Restore saved atom types after retrieve_dataloaders
    - Lines 294-333: Verify context_node_nf and provide clear error
-   - Lines 445-447: Save dataset_info alongside args
-   - Lines 455-457: Save dataset_info for epoch-specific checkpoints
+   - Lines 486-488: Save dataset_info alongside args
+   - Lines 497-499: Save dataset_info for epoch-specific checkpoints
+
+2. **Documentation Added**
+   - RESUME_CONTEXT_MISMATCH_COMPLETE_FIX.md: Comprehensive English documentation
+   - RESUME_CONTEXT_MISMATCH_COMPLETE_FIX_JA.md: Comprehensive Japanese documentation
 
 ## Testing
 

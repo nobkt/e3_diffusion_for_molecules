@@ -59,7 +59,7 @@ RuntimeError: Error(s) in loading state_dict for EnVariationalDiffusion:
 
 ### 1. データセット設定（dataset_info）の保存
 
-**変更ファイル**: `main_qm9.py` 445-447行と455-457行
+**変更ファイル**: `main_qm9.py` 486-488行と497-499行
 
 ```python
 # 継続学習の互換性のためにdataset_infoをargsと一緒に保存
@@ -265,8 +265,12 @@ def prepare_context(conditioning, minibatch, property_norms):
    - 204-222行: 継続時に保存されたdataset_infoを読み込む
    - 262-267行: retrieve_dataloadersの後に保存された原子タイプを復元
    - 294-333行: context_node_nfを検証し、明確なエラーを提供
-   - 445-447行: argsと一緒にdataset_infoを保存
-   - 455-457行: エポック固有のチェックポイントのためにdataset_infoを保存
+   - 486-488行: argsと一緒にdataset_infoを保存
+   - 497-499行: エポック固有のチェックポイントのためにdataset_infoを保存
+
+2. **追加されたドキュメント**
+   - RESUME_CONTEXT_MISMATCH_COMPLETE_FIX.md: 包括的な英語ドキュメント
+   - RESUME_CONTEXT_MISMATCH_COMPLETE_FIX_JA.md: 包括的な日本語ドキュメント
 
 ## テスト
 
