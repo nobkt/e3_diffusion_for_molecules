@@ -276,6 +276,9 @@ if args.resume is not None and hasattr(args, 'context_node_nf'):
         property_norms = compute_mean_mad(dataloaders, args.conditioning, args.dataset)
     else:
         property_norms = None
+    
+    # Ensure args.context_node_nf is preserved (redundant but explicit for safety)
+    args.context_node_nf = context_node_nf
 else:
     # Normal training: calculate context_node_nf from data
     if len(args.conditioning) > 0:
