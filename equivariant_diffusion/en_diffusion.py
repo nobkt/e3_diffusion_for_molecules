@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from equivariant_diffusion import utils
 import numpy as np
 import math
