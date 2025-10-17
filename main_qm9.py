@@ -296,6 +296,7 @@ if args.resume is not None and hasattr(args, 'context_node_nf'):
     # Use the saved context_node_nf from the checkpoint
     context_node_nf = args.context_node_nf
     print(f'Resuming training: using saved context_node_nf = {context_node_nf}')
+    print(f'DEBUG: args.context_node_nf before assignment = {args.context_node_nf}')
     
     # Still compute property_norms for conditioning
     if len(args.conditioning) > 0:
@@ -306,13 +307,22 @@ if args.resume is not None and hasattr(args, 'context_node_nf'):
     
     # Ensure args.context_node_nf is preserved (redundant but explicit for safety)
     args.context_node_nf = context_node_nf
+    print(f'DEBUG: args.context_node_nf after assignment = {args.context_node_nf}')
+    print(f'DEBUG: hasattr(args, "context_node_nf") = {hasattr(args, "context_node_nf")}')
 else:
     # Normal training: calculate context_node_nf from data
+    if args.resume is not None:
+        print(f'DEBUG: Entered else branch even though args.resume is not None!')
+        print(f'DEBUG: hasattr(args, "context_node_nf") = {hasattr(args, "context_node_nf")}')
+        if hasattr(args, 'context_node_nf'):
+            print(f'DEBUG: args.context_node_nf = {args.context_node_nf}')
+    
     if len(args.conditioning) > 0:
         print(f'Conditioning on {args.conditioning}')
         property_norms = compute_mean_mad(dataloaders, args.conditioning, args.dataset)
         context_dummy = prepare_context(args.conditioning, data_dummy, property_norms)
         context_node_nf = context_dummy.size(2)
+        print(f'DEBUG: Calculated context_node_nf from data = {context_node_nf}')
     else:
         context_node_nf = 0
         property_norms = None
@@ -321,6 +331,8 @@ else:
 
 
 # Create EGNN flow
+print(f'DEBUG: About to create model with args.context_node_nf = {args.context_node_nf}')
+print(f'DEBUG: dataset_info["atom_decoder"] has {len(dataset_info["atom_decoder"])} atom types')
 model, nodes_dist, prop_dist = get_model(args, device, dataset_info, dataloaders['train'])
 if prop_dist is not None:
     prop_dist.set_normalizer(property_norms)
