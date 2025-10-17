@@ -15,13 +15,26 @@ import tempfile
 from os.path import join
 
 
-def create_realistic_checkpoint(checkpoint_dir, context_node_nf=27):
+# Constants for test scenarios
+# These values match the actual error scenario from the bug report
+NUM_ATOM_TYPES = 11  # Standard atom types in QM9/ASE dataset: H, C, N, O, F, Si, P, S, Cl, Br, I
+SAVED_CONTEXT_NODE_NF = 27  # Context features from conditioning (molecular_weight + pi_conjugation_ratio + atom_types_encoding + functional_groups_encoding)
+RECALCULATED_CONTEXT_NODE_NF = 21  # Simulated different value that would cause the bug
+
+
+def create_realistic_checkpoint(checkpoint_dir, context_node_nf=SAVED_CONTEXT_NODE_NF):
     """
     Create a realistic checkpoint that mimics the actual training scenario.
     
+    This creates a checkpoint matching the error scenario from the bug report:
+    - Training with ASE database
+    - Conditioning on molecular descriptors (molecular_weight, pi_conjugation_ratio, etc.)
+    - Model saved with specific context_node_nf (default 27 features)
+    - Embedding layers sized for NUM_ATOM_TYPES + time + context_node_nf = 11 + 1 + 27 = 39 features
+    
     Args:
         checkpoint_dir: Directory to create the checkpoint in
-        context_node_nf: The context_node_nf value to save in args
+        context_node_nf: The context_node_nf value to save in args (default 27 to match bug scenario)
     """
     print(f"Creating realistic checkpoint...")
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -103,9 +116,9 @@ def create_realistic_checkpoint(checkpoint_dir, context_node_nf=27):
     # - dynamics.egnn.embedding_out.bias: torch.Size([39])
     
     # For our checkpoint with context_node_nf=27:
-    # in_node_nf = 11 (atom types) + 1 (time) = 12 if condition_time
+    # in_node_nf = NUM_ATOM_TYPES (atom types) + 1 (time) = 12 if condition_time
     # total input to EGNN = in_node_nf + context_node_nf = 12 + 27 = 39
-    in_node_nf = 11  # Number of atom types
+    in_node_nf = NUM_ATOM_TYPES  # Number of atom types in dataset
     if mock_args.condition_time:
         dynamics_in_node_nf = in_node_nf + 1  # Add 1 for time
     else:
@@ -163,12 +176,12 @@ def simulate_resume_without_fix(checkpoint_dir):
     
     # Simulate recalculation (without the fix)
     # In reality, this would come from prepare_context, but we'll simulate
-    # a different value to show the problem
-    recalculated_context_node_nf = 21  # Different from saved 27!
+    # a different value to show the problem (e.g., if dataset changed or conditioning features differ)
+    recalculated_context_node_nf = RECALCULATED_CONTEXT_NODE_NF  # Different from saved value!
     print(f"  - Recalculated context_node_nf = {recalculated_context_node_nf}")
     
     # Calculate expected embedding size
-    in_node_nf = 11
+    in_node_nf = NUM_ATOM_TYPES
     dynamics_in_node_nf = in_node_nf + 1  # +1 for time
     total_input_nf = dynamics_in_node_nf + recalculated_context_node_nf
     
@@ -214,11 +227,11 @@ def simulate_resume_with_fix(checkpoint_dir):
         print(f"  ✓ Using saved context_node_nf = {context_node_nf} (fix applied)")
     else:
         # Would recalculate (but we won't get here in resume scenario)
-        context_node_nf = 21
+        context_node_nf = RECALCULATED_CONTEXT_NODE_NF
         print(f"  - Would recalculate context_node_nf = {context_node_nf}")
     
     # Calculate expected embedding size
-    in_node_nf = 11
+    in_node_nf = NUM_ATOM_TYPES
     dynamics_in_node_nf = in_node_nf + 1  # +1 for time
     total_input_nf = dynamics_in_node_nf + context_node_nf
     
@@ -255,11 +268,10 @@ def main():
     with tempfile.TemporaryDirectory() as tmpdir:
         checkpoint_dir = join(tmpdir, 'exp_cond_molecular_descriptors')
         
-        # Create checkpoint with context_node_nf = 27
+        # Create checkpoint with context_node_nf = SAVED_CONTEXT_NODE_NF
         # This matches the error scenario where embedding expects 39 features:
-        # 11 atom types + 1 time + 27 context = 39
-        saved_context_node_nf = 27
-        mock_args, model_state = create_realistic_checkpoint(checkpoint_dir, saved_context_node_nf)
+        # NUM_ATOM_TYPES (11) + 1 time + SAVED_CONTEXT_NODE_NF (27) = 39
+        mock_args, model_state = create_realistic_checkpoint(checkpoint_dir, SAVED_CONTEXT_NODE_NF)
         
         print("\n" + "=" * 80)
         print("Scenario 1: Resume WITHOUT fix (buggy behavior)")
