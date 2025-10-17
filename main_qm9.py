@@ -264,16 +264,30 @@ if args.export_conditions_csv is not None:
 data_dummy = next(iter(dataloaders['train']))
 
 
-if len(args.conditioning) > 0:
-    print(f'Conditioning on {args.conditioning}')
-    property_norms = compute_mean_mad(dataloaders, args.conditioning, args.dataset)
-    context_dummy = prepare_context(args.conditioning, data_dummy, property_norms)
-    context_node_nf = context_dummy.size(2)
+# When resuming, preserve context_node_nf from saved args to ensure model architecture matches checkpoint
+if args.resume is not None and hasattr(args, 'context_node_nf'):
+    # Use the saved context_node_nf from the checkpoint
+    context_node_nf = args.context_node_nf
+    print(f'Resuming training: using saved context_node_nf = {context_node_nf}')
+    
+    # Still compute property_norms for conditioning
+    if len(args.conditioning) > 0:
+        print(f'Conditioning on {args.conditioning}')
+        property_norms = compute_mean_mad(dataloaders, args.conditioning, args.dataset)
+    else:
+        property_norms = None
 else:
-    context_node_nf = 0
-    property_norms = None
+    # Normal training: calculate context_node_nf from data
+    if len(args.conditioning) > 0:
+        print(f'Conditioning on {args.conditioning}')
+        property_norms = compute_mean_mad(dataloaders, args.conditioning, args.dataset)
+        context_dummy = prepare_context(args.conditioning, data_dummy, property_norms)
+        context_node_nf = context_dummy.size(2)
+    else:
+        context_node_nf = 0
+        property_norms = None
 
-args.context_node_nf = context_node_nf
+    args.context_node_nf = context_node_nf
 
 
 # Create EGNN flow
