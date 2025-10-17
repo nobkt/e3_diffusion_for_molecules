@@ -31,7 +31,8 @@ if args.resume is not None and hasattr(args, 'context_node_nf'):
     context_node_nf = args.context_node_nf
     print(f'Resuming training: using saved context_node_nf = {context_node_nf}')
     # ... compute property_norms ...
-    args.context_node_nf = context_node_nf  # ← ADDED THIS LINE
+    # ADDED: Explicit assignment to ensure value is properly set
+    args.context_node_nf = context_node_nf
 ```
 
 ### Documentation Added
@@ -93,8 +94,15 @@ The fix has been validated through:
 ## Backward Compatibility
 
 The fix maintains backward compatibility:
-- **New checkpoints** (with context_node_nf): Uses saved value
-- **Old checkpoints** (without context_node_nf): Falls back to recalculation from data
+- **New checkpoints** (with context_node_nf saved in args.pickle): 
+  - `hasattr(args, 'context_node_nf')` returns True
+  - Uses saved value from checkpoint (resume branch)
+  - Model architecture matches checkpoint perfectly
+- **Old checkpoints** (without context_node_nf in args.pickle): 
+  - `hasattr(args, 'context_node_nf')` returns False
+  - Goes to else branch
+  - Recalculates context_node_nf from current data using prepare_context()
+  - Note: May cause size mismatch if data has changed since checkpoint was created
 
 ## Impact
 
