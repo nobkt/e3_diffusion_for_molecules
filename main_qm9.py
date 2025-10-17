@@ -294,18 +294,47 @@ data_dummy = next(iter(dataloaders['train']))
 # When resuming, preserve context_node_nf from saved args to ensure model architecture matches checkpoint
 if args.resume is not None and hasattr(args, 'context_node_nf'):
     # Use the saved context_node_nf from the checkpoint
-    context_node_nf = args.context_node_nf
-    print(f'Resuming training: using saved context_node_nf = {context_node_nf}')
+    saved_context_node_nf = args.context_node_nf
+    print(f'Resuming training: using saved context_node_nf = {saved_context_node_nf}')
     print(f'DEBUG: args.context_node_nf before assignment = {args.context_node_nf}')
     
     # Still compute property_norms for conditioning
     if len(args.conditioning) > 0:
         print(f'Conditioning on {args.conditioning}')
         property_norms = compute_mean_mad(dataloaders, args.conditioning, args.dataset)
+        
+        # Verify that the current data produces the same context_node_nf as the checkpoint
+        context_dummy = prepare_context(args.conditioning, data_dummy, property_norms)
+        current_context_node_nf = context_dummy.size(2)
+        print(f'Current database produces context_node_nf = {current_context_node_nf}')
+        
+        if current_context_node_nf != saved_context_node_nf:
+            error_msg = (
+                f"\n{'='*70}\n"
+                f"ERROR: Context feature size mismatch!\n"
+                f"{'='*70}\n"
+                f"The checkpoint was trained with context_node_nf = {saved_context_node_nf}\n"
+                f"But the current database produces context_node_nf = {current_context_node_nf}\n"
+                f"\n"
+                f"This mismatch is likely caused by:\n"
+                f"  1. Different atom types in the current database vs. original training\n"
+                f"  2. Different functional groups in the current database\n"
+                f"  3. Different conditioning feature configurations\n"
+                f"\n"
+                f"To fix this:\n"
+                f"  - Use the SAME database file that was used for original training\n"
+                f"  - Ensure the database has the same molecules/properties\n"
+                f"  - Check that conditioning features match: {args.conditioning}\n"
+                f"{'='*70}\n"
+            )
+            raise ValueError(error_msg)
+        
+        context_node_nf = saved_context_node_nf
     else:
         property_norms = None
+        context_node_nf = 0
     
-    # Ensure args.context_node_nf is preserved (redundant but explicit for safety)
+    # Ensure args.context_node_nf is preserved
     args.context_node_nf = context_node_nf
     print(f'DEBUG: args.context_node_nf after assignment = {args.context_node_nf}')
     print(f'DEBUG: hasattr(args, "context_node_nf") = {hasattr(args, "context_node_nf")}')
