@@ -6,7 +6,7 @@ This directory contains comprehensive documentation for the E3 Equivariant Diffu
 
 **Status**: ✅ **COMPLETE**
 
-**Total Content**: 5,465 lines across 10 files
+**Total Content**: 6,229 lines across 11 files
 
 ---
 
@@ -81,6 +81,31 @@ This directory contains comprehensive documentation for the E3 Equivariant Diffu
 - Common error solutions
 - Production deployment tips
 - Hyperparameter tuning guide
+
+---
+
+### 4. molecular_crystal_generation_spec.md (764 lines)
+**Comprehensive Specification (Japanese)**
+
+**Contents**:
+- Molecular crystal generation overview
+- System architecture and data flow
+- Generation conditions detailed explanation
+- Answers to key questions:
+  - Can single molecule conditions be used for crystal generation?
+  - Can crystals be generated without specifying conditions?
+  - What conditions are necessary/sufficient for crystal generation?
+- Usage examples and best practices
+- Data preparation guidelines
+
+**Target Audience**: Japanese-speaking researchers, users, and developers
+
+**Key Sections**:
+- Single molecule vs crystal conditions comparison
+- Molecular EGNN feature extraction pipeline
+- Conditioning hierarchy (required vs optional)
+- Recommended condition combinations
+- Q&A format addressing common questions
 
 ---
 
@@ -276,10 +301,11 @@ if space_group is None:
 ```
 e3_diffusion_for_molecules/
 ├── doc/
-│   ├── theory.md              # 430 lines - Mathematical foundations
-│   ├── design.md              # 1,202 lines - Architecture & implementation
-│   ├── user_manual.md         # 1,489 lines - Complete usage guide
-│   └── README.md              # This file
+│   ├── theory.md                              # 430 lines - Mathematical foundations
+│   ├── design.md                              # 1,202 lines - Architecture & implementation
+│   ├── user_manual.md                         # 1,489 lines - Complete usage guide
+│   ├── molecular_crystal_generation_spec.md   # 764 lines - Japanese specification (NEW)
+│   └── README.md                              # This file
 │
 └── tutorials/
     ├── README.md                                    # 352 lines - Tutorial overview
@@ -332,6 +358,7 @@ e3_diffusion_for_molecules/
 ### Crystal Generation
 - [Crystal Theory](theory.md#crystal-extension-theory)
 - [Crystal Design](design.md#crystal-module)
+- [Crystal Specification (Japanese)](molecular_crystal_generation_spec.md)
 - [Crystal Tutorial](../tutorials/03_crystal_generation.ipynb)
 
 ### Evaluation
@@ -359,9 +386,10 @@ All documentation has been:
 | Theory | 1 | 430 | Complete |
 | Design | 1 | 1,202 | Complete |
 | User Manual | 1 | 1,489 | Complete |
+| Specification (JP) | 1 | 764 | Complete |
 | Tutorials | 6 | 1,992 | All features |
 | Tutorial Docs | 1 | 352 | Complete |
-| **Total** | **10** | **5,465** | **100%** |
+| **Total** | **11** | **6,229** | **100%** |
 
 ---
 
