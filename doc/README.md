@@ -6,7 +6,7 @@ This directory contains comprehensive documentation for the E3 Equivariant Diffu
 
 **Status**: ✅ **COMPLETE**
 
-**Total Content**: 6,229 lines across 11 files
+**Total Content**: 6,887 lines across 11 files (updated: molecular_crystal_generation_spec.md expanded from 764 to 1,422 lines)
 
 ---
 
@@ -84,7 +84,7 @@ This directory contains comprehensive documentation for the E3 Equivariant Diffu
 
 ---
 
-### 4. molecular_crystal_generation_spec.md (764 lines)
+### 4. molecular_crystal_generation_spec.md (1,422 lines)
 **Comprehensive Specification (Japanese)**
 
 **Contents**:
@@ -92,20 +92,30 @@ This directory contains comprehensive documentation for the E3 Equivariant Diffu
 - System architecture and data flow
 - Generation conditions detailed explanation
 - Answers to key questions:
-  - Can single molecule conditions be used for crystal generation?
-  - Can crystals be generated without specifying conditions?
-  - What conditions are necessary/sufficient for crystal generation?
+  - Q1: Can single molecule conditions be used for crystal generation?
+  - Q2: Can crystals be generated without specifying conditions?
+  - Q3: What conditions are necessary/sufficient for crystal generation?
+  - Q4 (NEW): Can crystals be generated using physical property values as conditions?
 - Usage examples and best practices
 - Data preparation guidelines
-
-**Target Audience**: Japanese-speaking researchers, users, and developers
 
 **Key Sections**:
 - Single molecule vs crystal conditions comparison
 - Molecular EGNN feature extraction pipeline
 - Conditioning hierarchy (required vs optional)
+- **NEW: Property-conditioned generation approaches**
+  - Current system limitations
+  - Four proposed approaches with implementation details
+  - Practical implementation roadmap
+  - Code examples for property optimization
 - Recommended condition combinations
 - Q&A format addressing common questions
+
+**Target Audience**: Japanese-speaking researchers, users, and developers
+
+**Update History**:
+- v1.0: Initial version with Q1-Q3
+- v1.1: Added Q4 about property-conditioned crystal generation (658 new lines)
 
 ---
 
@@ -304,7 +314,7 @@ e3_diffusion_for_molecules/
 │   ├── theory.md                              # 430 lines - Mathematical foundations
 │   ├── design.md                              # 1,202 lines - Architecture & implementation
 │   ├── user_manual.md                         # 1,489 lines - Complete usage guide
-│   ├── molecular_crystal_generation_spec.md   # 764 lines - Japanese specification (NEW)
+│   ├── molecular_crystal_generation_spec.md   # 1,422 lines - Japanese specification (v1.1)
 │   └── README.md                              # This file
 │
 └── tutorials/
@@ -386,10 +396,10 @@ All documentation has been:
 | Theory | 1 | 430 | Complete |
 | Design | 1 | 1,202 | Complete |
 | User Manual | 1 | 1,489 | Complete |
-| Specification (JP) | 1 | 764 | Complete |
+| Specification (JP) | 1 | 1,422 | Complete (v1.1 - Q4 added) |
 | Tutorials | 6 | 1,992 | All features |
 | Tutorial Docs | 1 | 352 | Complete |
-| **Total** | **11** | **6,229** | **100%** |
+| **Total** | **11** | **6,887** | **100%** |
 
 ---
 

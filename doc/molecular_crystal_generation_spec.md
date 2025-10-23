@@ -5,6 +5,10 @@
 2. [システムアーキテクチャ](#システムアーキテクチャ)
 3. [生成条件の詳細](#生成条件の詳細)
 4. [質問への回答](#質問への回答)
+   - [Q1: 単分子の生成条件を分子性結晶の生成条件に使うことは可能か](#q1-単分子の生成条件を分子性結晶の生成条件に使うことは可能か)
+   - [Q2: 構成分子やその他の生成条件を何も指定しなくても生成可能か](#q2-構成分子やその他の生成条件を何も指定しなくても生成可能か)
+   - [Q3: どの生成条件で生成可能か](#q3-どの生成条件で生成可能か)
+   - [Q4: 物性値を条件として分子性結晶を生成することは可能か](#q4-物性値を条件として分子性結晶を生成することは可能か) ←NEW
 5. [使用例](#使用例)
 6. [まとめ](#まとめ)
 
@@ -493,6 +497,656 @@ python main_crystal.py \
 
 ---
 
+### Q4: 物性値を条件として分子性結晶を生成することは可能か
+
+**質問の詳細**:
+```
+私がやりたいことは下記の仕様です
+・ある物性値を満たす分子性結晶を生成させたい
+・その分子性結晶は同じ分子から構成されるホモ結晶である
+・その分子性結晶の構成分子に対して、molecular_weight、pi_conjugation_ratio、
+  atom_types_encoding、functional_groups_encodingの条件を課したい
+
+現状で新規の分子性結晶を生成させたいときは、まず単分子の分子生成を使って
+molecular_weight、pi_conjugation_ratio、atom_types_encoding、
+functional_groups_encodingの条件で新規の分子を生成し、その分子構造を
+分子性結晶の生成条件として分子性結晶を生成させるやり方になると思います。
+でもそのやり方だと、物性値を生成条件として結晶を生成させることができません。
+私の要求を満たすにはどうしたらいいでしょうか？
+```
+
+**回答**: **現在のシステムでは直接的には不可能ですが、いくつかのアプローチが考えられます。以下に技術的な議論と実現可能な方法を示します。**
+
+---
+
+#### 現状の制約と問題点
+
+##### 1. 現在のシステムの構造
+
+現在の分子性結晶生成システムは、以下の2段階の構造になっています：
+
+```
+【ステップ1】単分子生成
+  入力: molecular_weight, pi_conjugation_ratio, atom_types_encoding, 
+        functional_groups_encoding
+  出力: 分子の3D構造
+
+【ステップ2】結晶生成
+  入力: 分子の3D構造（+ 結晶条件: space_group, density）
+  出力: 結晶構造
+```
+
+この構造では、**結晶の物性値を直接制御することができません**。
+
+##### 2. 問題点の詳細
+
+| 問題 | 説明 |
+|-----|------|
+| **結晶物性値の条件付けがない** | 現在の結晶生成モデルは、分子構造、空間群、密度を条件として受け取るが、**結晶の物性値（例：バンドギャップ、融点、機械的性質など）を条件として受け取ることができない** |
+| **2段階生成の限界** | 分子を先に生成してから結晶を生成する方式では、**分子生成時に結晶物性値を考慮できない** |
+| **逆問題の困難性** | 「どのような分子であれば、目的の結晶物性値を満たす結晶が生成できるか」という逆問題を解く必要があるが、これは非常に困難 |
+
+##### 3. なぜ直接的な実装が困難なのか
+
+```
+理由1: 結晶物性値の計算コスト
+- 結晶物性値（バンドギャップ、融点など）を正確に計算するには
+  第一原理計算やMD計算が必要
+- 訓練時に毎サンプルで計算するのは現実的でない
+
+理由2: データの不足
+- 結晶構造と物性値のペアデータが不足
+- 特に、同じ分子の異なる結晶形（ポリモルフ）における物性値データは稀
+
+理由3: 分子-結晶物性値の複雑な関係
+- 結晶の物性値は、分子の性質だけでなく、パッキング、対称性、
+  分子間相互作用など多くの要因に依存
+- これらの関係をモデル化するのは極めて困難
+```
+
+---
+
+#### 実現可能なアプローチ
+
+以下、4つのアプローチを提案します。それぞれに長所と短所があります。
+
+##### アプローチ1: 物性予測モデルとの組み合わせ（推奨度: ⭐⭐⭐⭐⭐）
+
+**概要**: 結晶物性予測モデルを構築し、生成された結晶をフィルタリングする。
+
+**ワークフロー**:
+```
+1. 分子条件で分子を生成
+   molecular_weight, pi_conjugation_ratio等を指定
+   ↓
+2. その分子で複数の結晶候補を生成
+   空間群や密度を変えて多様な結晶を生成
+   ↓
+3. 各結晶の物性値を予測
+   物性予測モデル（機械学習）で推定
+   ↓
+4. 目標物性値に近い結晶を選択
+   フィルタリングまたはランキング
+```
+
+**実装方法**:
+```python
+# 疑似コード
+# ステップ1: 分子生成
+molecule = generate_molecule(
+    molecular_weight=target_weight,
+    pi_conjugation_ratio=target_ratio,
+    # ...
+)
+
+# ステップ2: 複数の結晶を生成
+crystals = []
+for space_group in candidate_space_groups:
+    for density in candidate_densities:
+        crystal = generate_crystal(
+            molecule=molecule,
+            space_group=space_group,
+            density=density
+        )
+        crystals.append(crystal)
+
+# ステップ3: 物性値を予測
+property_predictor = load_property_predictor()
+predicted_properties = [
+    property_predictor(crystal) for crystal in crystals
+]
+
+# ステップ4: 目標に近い結晶を選択
+best_crystal = select_by_property(
+    crystals, 
+    predicted_properties, 
+    target_property=target_bandgap
+)
+```
+
+**長所**:
+- ✅ 現在のシステムを大きく変更する必要がない
+- ✅ 物性予測モデルは独立して訓練可能
+- ✅ 複数の物性値を同時に考慮できる
+- ✅ 既存の結晶構造-物性値データを活用できる
+
+**短所**:
+- ⚠️ 多数の結晶候補を生成する必要がある（計算コスト）
+- ⚠️ 物性予測モデルの精度に依存
+- ⚠️ 目標物性値を満たす結晶が生成されない可能性がある
+
+**推奨度**: **最も実用的で実現可能性が高い**
+
+---
+
+##### アプローチ2: 条件付き結晶生成モデルの拡張（推奨度: ⭐⭐⭐⭐）
+
+**概要**: 結晶生成モデルに物性値条件付けを追加する。
+
+**アーキテクチャ変更**:
+```
+現在:
+  結晶生成モデル(分子EGNN特徴量, space_group, density) → 結晶構造
+
+拡張後:
+  結晶生成モデル(分子EGNN特徴量, space_group, density, 物性値) → 結晶構造
+```
+
+**実装の概要**:
+```python
+# 新しい条件付けモジュール
+class PropertyConditioning(nn.Module):
+    """結晶物性値による条件付け"""
+    def __init__(self, property_dim, conditioning_dim):
+        super().__init__()
+        self.property_mlp = nn.Sequential(
+            nn.Linear(property_dim, conditioning_dim),
+            nn.SiLU(),
+            nn.Linear(conditioning_dim, conditioning_dim)
+        )
+    
+    def forward(self, properties):
+        """
+        properties: [batch, property_dim]
+            例: [bandgap, melting_point, density, ...]
+        """
+        return self.property_mlp(properties)
+
+# CombinedConditioningに統合
+class ExtendedCombinedConditioning(nn.Module):
+    def __init__(
+        self,
+        molecular_conditioning,
+        space_group_embedding=None,
+        density_conditioning=None,
+        property_conditioning=None,  # 追加
+    ):
+        # 実装...
+```
+
+**訓練データの要件**:
+```
+必要なデータ:
+- 分子構造
+- 結晶構造
+- 結晶物性値（バンドギャップ、融点など）
+  ↑ これが最大の課題
+
+データソース候補:
+- 実験データベース（Cambridge Structural Database + 物性値）
+- 第一原理計算による推定値
+- 既存の物性予測モデルによる推定値（ブートストラップ的アプローチ）
+```
+
+**長所**:
+- ✅ エンドツーエンドで物性値を条件として使用できる
+- ✅ 理論的に最もエレガント
+- ✅ 一度訓練すれば高速な生成が可能
+
+**短所**:
+- ⚠️ 大量の「結晶構造-物性値」ペアデータが必要
+- ⚠️ モデルの再訓練が必要（大規模な変更）
+- ⚠️ 物性値の種類ごとにモデルの再訓練が必要になる可能性
+
+**推奨度**: **データが十分にあれば理想的だが、実装コストが高い**
+
+---
+
+##### アプローチ3: 強化学習による最適化（推奨度: ⭐⭐⭐）
+
+**概要**: 強化学習で分子生成と結晶生成を同時最適化する。
+
+**フレームワーク**:
+```
+エージェント: 分子生成モデル + 結晶生成モデル
+状態: 現在の生成パラメータ
+行動: パラメータの調整（molecular_weight, space_group, density等）
+報酬: 生成された結晶の物性値が目標にどれだけ近いか
+```
+
+**ワークフロー**:
+```
+1. 初期パラメータをランダムに選択
+2. パラメータに基づいて分子を生成
+3. 分子から結晶を生成
+4. 結晶の物性値を計算/予測
+5. 報酬を計算（目標物性値との差）
+6. パラメータを更新
+7. 2-6を繰り返す
+```
+
+**実装の概要**:
+```python
+# 疑似コード
+class CrystalPropertyOptimizer:
+    def __init__(self, molecule_generator, crystal_generator, property_predictor):
+        self.mol_gen = molecule_generator
+        self.crys_gen = crystal_generator
+        self.prop_pred = property_predictor
+        self.policy_network = PolicyNetwork()
+    
+    def optimize(self, target_property, max_iterations=1000):
+        # 強化学習ループ
+        for iteration in range(max_iterations):
+            # 方策ネットワークで生成パラメータを決定
+            params = self.policy_network.sample()
+            
+            # 分子生成
+            molecule = self.mol_gen.generate(
+                molecular_weight=params['mw'],
+                pi_conjugation_ratio=params['pi_ratio'],
+                # ...
+            )
+            
+            # 結晶生成
+            crystal = self.crys_gen.generate(
+                molecule=molecule,
+                space_group=params['space_group'],
+                density=params['density']
+            )
+            
+            # 物性値予測
+            predicted_prop = self.prop_pred(crystal)
+            
+            # 報酬計算
+            reward = -abs(predicted_prop - target_property)
+            
+            # 方策更新
+            self.policy_network.update(params, reward)
+```
+
+**長所**:
+- ✅ モデルの再訓練が不要
+- ✅ 複数の目的を同時最適化できる
+- ✅ 探索的に最適解を見つけられる
+
+**短所**:
+- ⚠️ 収束までに多数のサンプリングが必要
+- ⚠️ 安定した訓練が困難
+- ⚠️ 物性値の計算/予測を多数回実行する必要がある
+
+**推奨度**: **研究的には興味深いが、実用性はやや低い**
+
+---
+
+##### アプローチ4: ベイズ最適化による探索（推奨度: ⭐⭐⭐⭐）
+
+**概要**: ベイズ最適化で生成パラメータを効率的に探索する。
+
+**フレームワーク**:
+```
+目的: 目標物性値を満たす結晶を最小の試行回数で見つける
+方法: ベイズ最適化（Gaussian Process + Acquisition Function）
+```
+
+**ワークフロー**:
+```
+1. 初期サンプリング
+   ランダムにいくつかのパラメータで結晶を生成し、物性値を計算
+   
+2. サロゲートモデル構築
+   パラメータ空間と物性値の関係をGaussian Processでモデル化
+   
+3. 次のサンプリング点を決定
+   Acquisition Function（EI, UCBなど）で最も有望な点を選択
+   
+4. 結晶生成と物性値計算
+   選択されたパラメータで結晶を生成し、物性値を計算
+   
+5. サロゲートモデルを更新
+   新しいデータ点でモデルを更新
+   
+6. 3-5を繰り返す
+```
+
+**実装の概要**:
+```python
+from skopt import gp_minimize
+from skopt.space import Real, Integer, Categorical
+
+# 疑似コード
+def objective_function(params):
+    """最小化する目的関数"""
+    mw, pi_ratio, space_group, density = params
+    
+    # 分子生成
+    molecule = generate_molecule(
+        molecular_weight=mw,
+        pi_conjugation_ratio=pi_ratio
+    )
+    
+    # 結晶生成
+    crystal = generate_crystal(
+        molecule=molecule,
+        space_group=space_group,
+        density=density
+    )
+    
+    # 物性値計算
+    property_value = compute_or_predict_property(crystal)
+    
+    # 目標との差を返す（最小化）
+    return abs(property_value - target_property)
+
+# パラメータ空間の定義
+space = [
+    Real(50.0, 500.0, name='molecular_weight'),
+    Real(0.0, 1.0, name='pi_conjugation_ratio'),
+    Integer(1, 230, name='space_group'),
+    Real(0.8, 2.0, name='density')
+]
+
+# ベイズ最適化実行
+result = gp_minimize(
+    objective_function,
+    space,
+    n_calls=50,  # 最大50回の評価
+    n_initial_points=10  # 初期ランダムサンプリング
+)
+
+print(f"最適パラメータ: {result.x}")
+print(f"最良の物性値差: {result.fun}")
+```
+
+**長所**:
+- ✅ 効率的な探索（少ない試行回数で最適解を見つける）
+- ✅ 実装が比較的簡単
+- ✅ モデルの再訓練が不要
+- ✅ 既存ツール（scikit-optimize等）が利用可能
+
+**短所**:
+- ⚠️ パラメータ空間が高次元の場合、効率が低下
+- ⚠️ 物性値の計算/予測を複数回実行する必要がある
+- ⚠️ 局所最適解に陥る可能性
+
+**推奨度**: **実用性と効率のバランスが良く、短期的な実装に適している**
+
+---
+
+#### 各アプローチの比較
+
+| アプローチ | 実装難易度 | データ要件 | 計算コスト | 精度 | 推奨度 |
+|-----------|-----------|-----------|-----------|------|--------|
+| **1. 物性予測+フィルタリング** | 低 | 中 | 中 | 高 | ⭐⭐⭐⭐⭐ |
+| **2. モデル拡張** | 高 | 高 | 低（訓練後） | 最高 | ⭐⭐⭐⭐ |
+| **3. 強化学習** | 高 | 低 | 高 | 中 | ⭐⭐⭐ |
+| **4. ベイズ最適化** | 低 | 低 | 中 | 高 | ⭐⭐⭐⭐ |
+
+---
+
+#### 実装ロードマップ（推奨）
+
+以下、段階的な実装を推奨します：
+
+##### フェーズ1: 物性予測モデルの構築（短期: 1-2ヶ月）
+```
+1. 既存の結晶構造データベースから物性値を収集
+   - Cambridge Structural Database
+   - Materials Project
+   - 文献データ
+
+2. 結晶構造→物性値の予測モデルを訓練
+   - Graph Neural Network (例: SchNet, CGCNN)
+   - 入力: 結晶構造（原子座標、格子定数）
+   - 出力: 物性値（バンドギャップ、密度など）
+
+3. アプローチ1（物性予測+フィルタリング）を実装
+```
+
+##### フェーズ2: ベイズ最適化の導入（中期: 1-2ヶ月）
+```
+1. パラメータ空間の定義
+   - 分子生成パラメータ
+   - 結晶生成パラメータ
+
+2. 目的関数の実装
+   - 生成→物性予測→目標との比較
+
+3. ベイズ最適化フレームワークの統合
+   - scikit-optimize等を使用
+```
+
+##### フェーズ3: モデル拡張の検討（長期: 3-6ヶ月）
+```
+1. 結晶構造-物性値ペアデータの大規模収集/生成
+
+2. 物性値条件付けモジュールの実装
+   - PropertyConditioning
+   - CombinedConditioningへの統合
+
+3. モデルの再訓練と評価
+```
+
+---
+
+#### 実践的な使用例
+
+##### 例1: 物性予測+フィルタリング方式
+
+```bash
+# ステップ1: 物性予測モデルを訓練（事前準備）
+python train_property_predictor.py \
+    --crystal_db data/crystals.db \
+    --property bandgap \
+    --model_type cgcnn \
+    --output_dir models/property_predictor
+
+# ステップ2: 目標分子条件で分子を生成
+python main_qm9.py \
+    --conditioning molecular_weight pi_conjugation_ratio \
+    --molecular_weight 150.0 \
+    --pi_conjugation_ratio 0.6 \
+    --n_samples 10 \
+    --output_dir generated_molecules
+
+# ステップ3: 各分子で複数の結晶候補を生成
+for mol_id in mol_001 mol_002 mol_003; do
+    for sg in 1 2 14 15 19; do
+        for dens in 1.2 1.4 1.6; do
+            python main_crystal.py \
+                --molecule_db_path generated_molecules/molecules.db \
+                --crystal_db_path generated_molecules/crystals.db \
+                --target_molecule_id $mol_id \
+                --conditioning space_group density \
+                --space_group $sg \
+                --density $dens \
+                --exp_name "crystal_${mol_id}_sg${sg}_d${dens}"
+        done
+    done
+done
+
+# ステップ4: 全結晶の物性値を予測
+python predict_crystal_properties.py \
+    --crystal_db generated_molecules/crystals.db \
+    --predictor_path models/property_predictor/model.pt \
+    --property bandgap \
+    --output properties.csv
+
+# ステップ5: 目標に近い結晶を選択
+python select_best_crystals.py \
+    --properties_csv properties.csv \
+    --target_property 2.5 \
+    --top_k 10 \
+    --output best_crystals.csv
+```
+
+##### 例2: ベイズ最適化方式
+
+```python
+# crystal_optimization.py（新規作成）
+
+from skopt import gp_minimize
+from skopt.space import Real, Integer
+import subprocess
+import json
+
+def generate_and_evaluate(params):
+    """
+    パラメータに基づいて結晶を生成し、物性値を評価
+    
+    Args:
+        params: [molecular_weight, pi_conjugation_ratio, space_group, density]
+    
+    Returns:
+        score: 目標物性値との差（最小化したい）
+    """
+    mw, pi_ratio, space_group, density = params
+    
+    # 分子生成
+    subprocess.run([
+        'python', 'main_qm9.py',
+        '--molecular_weight', str(mw),
+        '--pi_conjugation_ratio', str(pi_ratio),
+        '--n_samples', '1',
+        '--output_dir', 'temp_mol'
+    ])
+    
+    # 結晶生成
+    subprocess.run([
+        'python', 'main_crystal.py',
+        '--molecule_db_path', 'temp_mol/molecules.db',
+        '--space_group', str(space_group),
+        '--density', str(density),
+        '--output_dir', 'temp_crystal'
+    ])
+    
+    # 物性値予測
+    result = subprocess.run([
+        'python', 'predict_property.py',
+        '--crystal_path', 'temp_crystal/crystal.cif',
+        '--property', 'bandgap'
+    ], capture_output=True, text=True)
+    
+    predicted_property = float(result.stdout.strip())
+    target_property = 2.5  # 目標バンドギャップ
+    
+    score = abs(predicted_property - target_property)
+    
+    print(f"Params: mw={mw:.1f}, pi={pi_ratio:.2f}, "
+          f"sg={space_group}, d={density:.2f} "
+          f"-> Property={predicted_property:.2f}, Score={score:.3f}")
+    
+    return score
+
+# パラメータ空間
+space = [
+    Real(50.0, 300.0, name='molecular_weight'),
+    Real(0.0, 1.0, name='pi_conjugation_ratio'),
+    Integer(1, 230, name='space_group'),
+    Real(0.8, 2.0, name='density')
+]
+
+# ベイズ最適化実行
+result = gp_minimize(
+    generate_and_evaluate,
+    space,
+    n_calls=30,
+    n_initial_points=10,
+    random_state=42
+)
+
+print("\n=== 最適化結果 ===")
+print(f"最適パラメータ:")
+print(f"  molecular_weight: {result.x[0]:.1f}")
+print(f"  pi_conjugation_ratio: {result.x[1]:.3f}")
+print(f"  space_group: {result.x[2]}")
+print(f"  density: {result.x[3]:.2f}")
+print(f"最小スコア（目標との差）: {result.fun:.3f}")
+
+# 結果を保存
+with open('optimization_result.json', 'w') as f:
+    json.dump({
+        'optimal_params': {
+            'molecular_weight': result.x[0],
+            'pi_conjugation_ratio': result.x[1],
+            'space_group': result.x[2],
+            'density': result.x[3]
+        },
+        'best_score': result.fun
+    }, f, indent=2)
+```
+
+実行方法:
+```bash
+python crystal_optimization.py
+```
+
+---
+
+#### まとめと推奨事項
+
+##### 質問への回答
+
+```
+質問: 物性値を条件として分子性結晶を生成できるか？
+回答: 現在のシステムでは直接的には不可能だが、以下の方法で実現可能
+
+推奨される実装順序:
+  1. 【短期】物性予測モデル + フィルタリング方式
+     ↓
+  2. 【中期】ベイズ最適化による効率化
+     ↓
+  3. 【長期】モデル拡張（物性値条件付けの追加）
+
+最も実用的な方法: アプローチ1（物性予測+フィルタリング）
+  理由: 
+  - 実装が比較的容易
+  - 既存システムへの変更が最小限
+  - 段階的な改善が可能
+```
+
+##### 技術的な課題
+
+| 課題 | 対策 |
+|-----|------|
+| **物性値データの不足** | 既存データベース活用 + 第一原理計算 + 物性予測モデルでのブートストラップ |
+| **計算コストが高い** | ベイズ最適化で効率化 + GPUクラスタの活用 |
+| **物性予測の精度** | 複数の予測モデルのアンサンブル + 実験検証 |
+| **パラメータ空間が広い** | ドメイン知識による制約 + 階層的最適化 |
+
+##### 次のステップ
+
+```
+1. 物性予測モデルの構築
+   - データ収集（CSD, Materials Project等）
+   - モデル選定（CGCNN, SchNet等）
+   - 訓練と評価
+
+2. パイロット実装
+   - 小規模データセットでアプローチ1を実装
+   - 精度と効率を検証
+
+3. スケールアップ
+   - ベイズ最適化の導入
+   - 並列化による高速化
+
+4. 長期的改善
+   - モデル拡張の検討
+   - エンドツーエンド学習の可能性を探る
+```
+
+---
+
 ## 使用例
 
 ### 例1: 最小限の条件で生成（分子のみ指定）
@@ -760,5 +1414,9 @@ db.write(
 ---
 
 **文書作成日**: 2025-01-XX  
-**バージョン**: 1.0  
-**ステータス**: 完成
+**最終更新日**: 2025-10-23  
+**バージョン**: 1.1  
+**ステータス**: 更新（Q4追加: 物性値条件付け生成に関する議論）  
+**更新履歴**:
+- v1.0 (2025-01-XX): 初版作成（Q1-Q3）
+- v1.1 (2025-10-23): Q4追加（物性値を条件とした結晶生成の実現方法）
