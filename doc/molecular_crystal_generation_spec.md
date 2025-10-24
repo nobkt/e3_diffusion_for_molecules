@@ -515,9 +515,776 @@ functional_groups_encodingの条件で新規の分子を生成し、その分子
 私の要求を満たすにはどうしたらいいでしょうか？
 ```
 
-**回答**: **現在のシステムでは直接的には不可能ですが、いくつかのアプローチが考えられます。以下に技術的な議論と実現可能な方法を示します。**
+**更新情報（2025-10-24）**:
+```
+下記のデータセットを準備できます：
+・単分子の構造とその分子から構成される分子性結晶（ホモ結晶）の構造
+・その分子性結晶を使って計算した物性値
+
+このデータセットを使って、分子性結晶の構成分子のmolecular_weight、
+pi_conjugation_ratio、atom_types_encoding、functional_groups_encodingと
+分子性結晶の物性値や対称性等の構造因子を生成条件として与えると、
+その条件を満たす分子性結晶の候補が生成されるようにしたい。
+```
+
+**回答**: **物性値データが利用可能な場合、モデルを拡張して直接的な物性値条件付け生成が可能です。以下に技術的な議論と具体的な実装方法を示します。**
 
 ---
+
+#### 【新規】物性値データが利用可能な場合の推奨アプローチ
+
+##### 概要
+
+あなたのケースでは、**単分子構造、分子性結晶構造、物性値の三つ組データ**が利用可能です。この場合、以下のアプローチが最も効果的です：
+
+```
+データセット:
+  分子構造 + 分子性結晶構造 + 物性値
+  ↓
+生成条件:
+  ・分子条件: molecular_weight, pi_conjugation_ratio, 
+              atom_types_encoding, functional_groups_encoding
+  ・結晶条件: space_group, density, lattice_params
+  ・物性条件: bandgap, melting_point, など（新規）
+  ↓
+生成結果:
+  すべての条件を満たす分子性結晶構造
+```
+
+##### アーキテクチャ拡張
+
+**1. データ構造の拡張**
+
+既存のデータベースに物性値を追加します：
+
+```python
+# crystals.db の構造を拡張
+db.write(
+    crystal_structure,
+    data={
+        'crystal_id': 'crystal_001',
+        'molecule_id': 'mol_001',
+        'space_group': 14,
+        'density': 1.2,
+        # 新規: 物性値の追加
+        'bandgap': 2.5,           # eV
+        'melting_point': 180.0,   # °C
+        'dielectric_constant': 3.2,
+        'thermal_conductivity': 0.15,  # W/m·K
+        # 必要に応じて他の物性値も追加
+    }
+)
+```
+
+**2. PropertyConditioning モジュールの実装**
+
+物性値による条件付けを行う新しいモジュールを実装します：
+
+```python
+# crystal/conditioning/property_conditioning.py（新規作成）
+
+import torch
+import torch.nn as nn
+
+class PropertyConditioning(nn.Module):
+    """
+    結晶物性値による条件付けモジュール
+    
+    物性値（バンドギャップ、融点など）を受け取り、
+    条件付けベクトルに変換する。
+    """
+    
+    def __init__(
+        self,
+        property_names,
+        conditioning_dim=256,
+        hidden_dim=512,
+        n_layers=3
+    ):
+        """
+        Args:
+            property_names: 物性値の名前リスト
+                例: ['bandgap', 'melting_point', 'dielectric_constant']
+            conditioning_dim: 出力の条件付けベクトルの次元
+            hidden_dim: 隠れ層の次元
+            n_layers: MLPの層数
+        """
+        super().__init__()
+        self.property_names = property_names
+        self.property_dim = len(property_names)
+        self.conditioning_dim = conditioning_dim
+        
+        # 物性値の正規化パラメータ（訓練時に計算）
+        self.register_buffer('property_mean', torch.zeros(self.property_dim))
+        self.register_buffer('property_std', torch.ones(self.property_dim))
+        
+        # MLP: 物性値 → 条件付けベクトル
+        layers = []
+        in_dim = self.property_dim
+        for i in range(n_layers):
+            out_dim = hidden_dim if i < n_layers - 1 else conditioning_dim
+            layers.extend([
+                nn.Linear(in_dim, out_dim),
+                nn.SiLU() if i < n_layers - 1 else nn.Identity()
+            ])
+            in_dim = out_dim
+        self.property_mlp = nn.Sequential(*layers)
+        
+    def forward(self, properties):
+        """
+        Args:
+            properties: [batch_size, property_dim]
+                物性値のテンソル
+                例: [[bandgap, melting_point, dielectric_constant], ...]
+        
+        Returns:
+            conditioning: [batch_size, conditioning_dim]
+                条件付けベクトル
+        """
+        # 正規化
+        properties_normalized = (properties - self.property_mean) / (self.property_std + 1e-8)
+        
+        # 条件付けベクトルに変換
+        conditioning = self.property_mlp(properties_normalized)
+        
+        return conditioning
+    
+    def set_normalization_params(self, mean, std):
+        """
+        正規化パラメータを設定
+        
+        Args:
+            mean: [property_dim] 平均値
+            std: [property_dim] 標準偏差
+        """
+        self.property_mean.copy_(mean)
+        self.property_std.copy_(std)
+```
+
+**3. CombinedConditioning の拡張**
+
+既存の条件付けモジュールに物性値条件付けを統合します：
+
+```python
+# crystal/conditioning/__init__.py を更新
+
+class ExtendedCombinedConditioning(nn.Module):
+    """
+    複数の条件付けを統合するモジュール（物性値対応版）
+    
+    - 分子条件（MolecularConditioning）
+    - 空間群条件（SpaceGroupEmbedding）
+    - 密度条件（DensityConditioning）
+    - 物性値条件（PropertyConditioning）← 新規追加
+    """
+    
+    def __init__(
+        self,
+        molecular_conditioning,
+        space_group_embedding=None,
+        density_conditioning=None,
+        property_conditioning=None,  # 新規
+        conditioning_dim=256
+    ):
+        super().__init__()
+        self.molecular_conditioning = molecular_conditioning
+        self.space_group_embedding = space_group_embedding
+        self.density_conditioning = density_conditioning
+        self.property_conditioning = property_conditioning  # 新規
+        
+        # 統合用のアテンション機構または線形結合
+        self.num_conditionings = 1  # 分子条件は必須
+        if space_group_embedding is not None:
+            self.num_conditionings += 1
+        if density_conditioning is not None:
+            self.num_conditionings += 1
+        if property_conditioning is not None:
+            self.num_conditionings += 1
+        
+        # 統合用MLP
+        self.combine_mlp = nn.Sequential(
+            nn.Linear(conditioning_dim * self.num_conditionings, conditioning_dim * 2),
+            nn.SiLU(),
+            nn.Linear(conditioning_dim * 2, conditioning_dim)
+        )
+    
+    def forward(
+        self,
+        molecular_features,
+        space_group=None,
+        density=None,
+        properties=None  # 新規: [batch_size, property_dim]
+    ):
+        """
+        Args:
+            molecular_features: 分子特徴量
+            space_group: 空間群番号（オプション）
+            density: 密度（オプション）
+            properties: 物性値テンソル（オプション）
+        
+        Returns:
+            combined_conditioning: [batch_size, conditioning_dim]
+        """
+        conditionings = []
+        
+        # 1. 分子条件（必須）
+        mol_cond = self.molecular_conditioning(molecular_features)
+        conditionings.append(mol_cond)
+        
+        # 2. 空間群条件（オプション）
+        if self.space_group_embedding is not None and space_group is not None:
+            sg_cond = self.space_group_embedding(space_group)
+            conditionings.append(sg_cond)
+        
+        # 3. 密度条件（オプション）
+        if self.density_conditioning is not None and density is not None:
+            density_cond = self.density_conditioning(density)
+            conditionings.append(density_cond)
+        
+        # 4. 物性値条件（オプション）← 新規
+        if self.property_conditioning is not None and properties is not None:
+            prop_cond = self.property_conditioning(properties)
+            conditionings.append(prop_cond)
+        
+        # すべての条件を結合
+        combined = torch.cat(conditionings, dim=-1)
+        
+        # 統合
+        combined_conditioning = self.combine_mlp(combined)
+        
+        return combined_conditioning
+```
+
+**4. データローダーの更新**
+
+物性値をロードするようにデータローダーを更新します：
+
+```python
+# crystal/data/crystal_loader.py を更新
+
+class CrystalDatasetWithProperties(CrystalDataset):
+    """
+    物性値を含む結晶データセット
+    """
+    
+    def __init__(
+        self,
+        crystal_db_path,
+        molecule_db_path,
+        property_names=None,  # 新規: 使用する物性値のリスト
+        **kwargs
+    ):
+        super().__init__(crystal_db_path, molecule_db_path, **kwargs)
+        self.property_names = property_names or []
+        
+        # 物性値の統計情報を計算
+        self._compute_property_statistics()
+    
+    def _compute_property_statistics(self):
+        """物性値の平均と標準偏差を計算"""
+        if not self.property_names:
+            return
+        
+        property_values = []
+        for row in self.crystal_db.select():
+            values = [row.data.get(prop_name, 0.0) for prop_name in self.property_names]
+            property_values.append(values)
+        
+        property_values = torch.tensor(property_values, dtype=torch.float32)
+        self.property_mean = property_values.mean(dim=0)
+        self.property_std = property_values.std(dim=0)
+        
+        print(f"物性値の統計情報:")
+        for i, name in enumerate(self.property_names):
+            print(f"  {name}: mean={self.property_mean[i]:.3f}, std={self.property_std[i]:.3f}")
+    
+    def __getitem__(self, idx):
+        # 親クラスからデータを取得
+        data = super().__getitem__(idx)
+        
+        # 物性値を追加
+        if self.property_names:
+            row = self.crystal_db.get(idx + 1)
+            properties = torch.tensor(
+                [row.data.get(prop_name, 0.0) for prop_name in self.property_names],
+                dtype=torch.float32
+            )
+            data['properties'] = properties
+        
+        return data
+```
+
+##### 訓練方法
+
+**1. データ準備スクリプト**
+
+```python
+# scripts/prepare_property_dataset.py（新規作成）
+
+"""
+分子-結晶-物性値データセットの準備
+"""
+
+from ase.db import connect
+import numpy as np
+
+def prepare_dataset(
+    input_molecules_db,
+    input_crystals_db,
+    property_file,  # CSV形式: crystal_id, property_name, property_value
+    output_molecules_db,
+    output_crystals_db
+):
+    """
+    物性値を含むデータセットを準備
+    
+    Args:
+        input_molecules_db: 入力分子データベース
+        input_crystals_db: 入力結晶データベース
+        property_file: 物性値のCSVファイル
+        output_molecules_db: 出力分子データベース（コピー）
+        output_crystals_db: 出力結晶データベース（物性値を追加）
+    """
+    import pandas as pd
+    
+    # 物性値を読み込み
+    property_df = pd.read_csv(property_file)
+    
+    # crystal_id をキーとした辞書に変換
+    property_dict = {}
+    for _, row in property_df.iterrows():
+        crystal_id = row['crystal_id']
+        prop_name = row['property_name']
+        prop_value = row['property_value']
+        
+        if crystal_id not in property_dict:
+            property_dict[crystal_id] = {}
+        property_dict[crystal_id][prop_name] = prop_value
+    
+    # 分子データベースをコピー
+    mol_db_in = connect(input_molecules_db)
+    mol_db_out = connect(output_molecules_db, append=False)
+    
+    for row in mol_db_in.select():
+        mol_db_out.write(row.toatoms(), data=row.data)
+    
+    print(f"分子データベース: {len(mol_db_in)} 分子をコピーしました")
+    
+    # 結晶データベースに物性値を追加してコピー
+    crys_db_in = connect(input_crystals_db)
+    crys_db_out = connect(output_crystals_db, append=False)
+    
+    n_with_properties = 0
+    for row in crys_db_in.select():
+        data = dict(row.data)
+        crystal_id = data.get('crystal_id', f'crystal_{row.id}')
+        
+        # 物性値を追加
+        if crystal_id in property_dict:
+            data.update(property_dict[crystal_id])
+            n_with_properties += 1
+        
+        crys_db_out.write(row.toatoms(), data=data)
+    
+    print(f"結晶データベース: {len(crys_db_in)} 結晶をコピーしました")
+    print(f"  うち物性値あり: {n_with_properties} 結晶")
+
+if __name__ == '__main__':
+    prepare_dataset(
+        input_molecules_db='data/molecules.db',
+        input_crystals_db='data/crystals.db',
+        property_file='data/crystal_properties.csv',
+        output_molecules_db='data/molecules_with_props.db',
+        output_crystals_db='data/crystals_with_props.db'
+    )
+```
+
+**物性値CSVファイルの形式例**:
+```csv
+crystal_id,property_name,property_value
+crystal_001,bandgap,2.5
+crystal_001,melting_point,180.0
+crystal_001,dielectric_constant,3.2
+crystal_002,bandgap,3.1
+crystal_002,melting_point,210.0
+crystal_002,dielectric_constant,2.8
+```
+
+**2. 訓練スクリプトの更新**
+
+```python
+# main_crystal_with_properties.py（新規作成または main_crystal.py を拡張）
+
+import argparse
+import torch
+from crystal.data.crystal_loader import CrystalDatasetWithProperties
+from crystal.conditioning import ExtendedCombinedConditioning
+from crystal.conditioning.property_conditioning import PropertyConditioning
+# ... 他のインポート
+
+def main(args):
+    # データセットの準備
+    dataset = CrystalDatasetWithProperties(
+        crystal_db_path=args.crystal_db_path,
+        molecule_db_path=args.molecule_db_path,
+        property_names=args.property_names  # 例: ['bandgap', 'melting_point']
+    )
+    
+    # PropertyConditioningモジュールの作成
+    property_conditioning = PropertyConditioning(
+        property_names=args.property_names,
+        conditioning_dim=args.conditioning_dim
+    )
+    
+    # 正規化パラメータを設定
+    property_conditioning.set_normalization_params(
+        dataset.property_mean,
+        dataset.property_std
+    )
+    
+    # ExtendedCombinedConditioningの作成
+    combined_conditioning = ExtendedCombinedConditioning(
+        molecular_conditioning=molecular_conditioning,
+        space_group_embedding=space_group_embedding if args.use_space_group else None,
+        density_conditioning=density_conditioning if args.use_density else None,
+        property_conditioning=property_conditioning  # 新規
+    )
+    
+    # モデルの訓練
+    # ...（既存の訓練ループに物性値の条件付けを追加）
+    
+    for batch in dataloader:
+        molecular_features = batch['molecular_features']
+        space_group = batch.get('space_group')
+        density = batch.get('density')
+        properties = batch.get('properties')  # 新規
+        
+        # 条件付けベクトルの計算
+        conditioning = combined_conditioning(
+            molecular_features=molecular_features,
+            space_group=space_group,
+            density=density,
+            properties=properties  # 新規
+        )
+        
+        # モデルに渡して訓練
+        # ...
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    # 既存の引数
+    parser.add_argument('--molecule_db_path', required=True)
+    parser.add_argument('--crystal_db_path', required=True)
+    # 新規の引数
+    parser.add_argument('--property_names', nargs='+', 
+                       help='物性値の名前リスト（例: bandgap melting_point）')
+    parser.add_argument('--conditioning_dim', type=int, default=256)
+    # ...
+    args = parser.parse_args()
+    main(args)
+```
+
+##### 使用例
+
+**1. データ準備**
+
+```bash
+# ステップ1: 物性値データを準備（CSV形式）
+# crystal_properties.csv を作成
+
+# ステップ2: データセットに物性値を追加
+python scripts/prepare_property_dataset.py \
+    --input_molecules_db data/molecules.db \
+    --input_crystals_db data/crystals.db \
+    --property_file data/crystal_properties.csv \
+    --output_molecules_db data/molecules_with_props.db \
+    --output_crystals_db data/crystals_with_props.db
+```
+
+**2. モデル訓練**
+
+```bash
+# 物性値を条件として含めて訓練
+python main_crystal_with_properties.py \
+    --molecule_db_path data/molecules_with_props.db \
+    --crystal_db_path data/crystals_with_props.db \
+    --property_names bandgap melting_point dielectric_constant \
+    --conditioning space_group density \
+    --n_epochs 500 \
+    --batch_size 32 \
+    --exp_name crystal_with_properties
+```
+
+**3. 生成（インファレンス）**
+
+```bash
+# 目標物性値を指定して結晶を生成
+python crystal/sampling_with_properties.py \
+    --model_path outputs/crystal_with_properties/generative_model.npy \
+    --molecule_db_path data/molecules_with_props.db \
+    --target_molecule_id "mol_001" \
+    --target_properties bandgap=2.5 melting_point=180.0 dielectric_constant=3.2 \
+    --space_group 14 \
+    --density 1.2 \
+    --n_samples 100 \
+    --output_dir samples/property_conditioned_crystals
+```
+
+##### 分子条件との統合
+
+あなたの要求では、分子の条件（molecular_weight, pi_conjugation_ratio等）も同時に指定したいとのことです。これを実現するワークフローを示します：
+
+**ワークフロー全体**:
+
+```
+ステップ1: 分子条件で分子を選択/生成
+  molecular_weight, pi_conjugation_ratio,
+  atom_types_encoding, functional_groups_encoding
+  ↓
+ステップ2: 選択した分子と物性値条件で結晶を生成
+  分子条件 + 物性値条件 + 結晶条件（space_group, density等）
+  ↓
+結果: すべての条件を満たす分子性結晶
+```
+
+**実装例**:
+
+```python
+# generate_crystal_with_all_conditions.py（新規作成）
+
+"""
+分子条件 + 物性値条件で結晶を生成
+"""
+
+import argparse
+import torch
+from ase.db import connect
+
+def select_molecules_by_conditions(
+    molecule_db_path,
+    molecular_weight_range=(None, None),
+    pi_conjugation_ratio_range=(None, None),
+    required_atom_types=None,
+    required_functional_groups=None
+):
+    """
+    分子条件に基づいて分子を選択
+    
+    Returns:
+        molecule_ids: 条件を満たす分子のIDリスト
+    """
+    db = connect(molecule_db_path)
+    molecule_ids = []
+    
+    for row in db.select():
+        data = row.data
+        
+        # 分子量の条件
+        mw = data.get('molecular_weight', 0)
+        if molecular_weight_range[0] is not None and mw < molecular_weight_range[0]:
+            continue
+        if molecular_weight_range[1] is not None and mw > molecular_weight_range[1]:
+            continue
+        
+        # π共役比率の条件
+        pi_ratio = data.get('pi_conjugation_ratio', 0)
+        if pi_conjugation_ratio_range[0] is not None and pi_ratio < pi_conjugation_ratio_range[0]:
+            continue
+        if pi_conjugation_ratio_range[1] is not None and pi_ratio > pi_conjugation_ratio_range[1]:
+            continue
+        
+        # 元素タイプの条件
+        if required_atom_types is not None:
+            atom_types = set(data.get('atom_types', []))
+            if not set(required_atom_types).issubset(atom_types):
+                continue
+        
+        # 官能基の条件
+        if required_functional_groups is not None:
+            functional_groups = set(data.get('functional_groups', []))
+            if not set(required_functional_groups).issubset(functional_groups):
+                continue
+        
+        molecule_ids.append(data['molecule_id'])
+    
+    return molecule_ids
+
+def generate_crystals_with_all_conditions(
+    model_path,
+    molecule_db_path,
+    molecular_weight_range=(100, 200),
+    pi_conjugation_ratio_range=(0.3, 0.7),
+    target_properties={'bandgap': 2.5, 'melting_point': 180.0},
+    space_group=14,
+    density=1.2,
+    n_samples=10,
+    output_dir='generated_crystals'
+):
+    """
+    すべての条件を指定して結晶を生成
+    """
+    # ステップ1: 分子条件で分子を選択
+    print("ステップ1: 分子条件に基づいて分子を選択...")
+    molecule_ids = select_molecules_by_conditions(
+        molecule_db_path=molecule_db_path,
+        molecular_weight_range=molecular_weight_range,
+        pi_conjugation_ratio_range=pi_conjugation_ratio_range
+    )
+    print(f"  {len(molecule_ids)} 個の分子が条件を満たしています")
+    
+    if not molecule_ids:
+        print("条件を満たす分子が見つかりませんでした")
+        return
+    
+    # ステップ2: 各分子で結晶を生成
+    print("ステップ2: 選択した分子で結晶を生成...")
+    
+    from crystal.sampling_with_properties import sample_crystals_with_properties
+    
+    for mol_id in molecule_ids:
+        print(f"\n分子 {mol_id} で結晶を生成中...")
+        
+        sample_crystals_with_properties(
+            model_path=model_path,
+            molecule_db_path=molecule_db_path,
+            target_molecule_id=mol_id,
+            target_properties=target_properties,
+            space_group=space_group,
+            density=density,
+            n_samples=n_samples,
+            output_dir=f"{output_dir}/{mol_id}"
+        )
+        
+        print(f"  {n_samples} 個の結晶を生成しました")
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='分子条件と物性値条件で結晶を生成'
+    )
+    
+    # 分子条件
+    parser.add_argument('--molecular_weight_min', type=float, default=100)
+    parser.add_argument('--molecular_weight_max', type=float, default=200)
+    parser.add_argument('--pi_conjugation_ratio_min', type=float, default=0.3)
+    parser.add_argument('--pi_conjugation_ratio_max', type=float, default=0.7)
+    
+    # 物性値条件
+    parser.add_argument('--target_bandgap', type=float, default=2.5)
+    parser.add_argument('--target_melting_point', type=float, default=180.0)
+    
+    # 結晶条件
+    parser.add_argument('--space_group', type=int, default=14)
+    parser.add_argument('--density', type=float, default=1.2)
+    
+    # その他
+    parser.add_argument('--model_path', required=True)
+    parser.add_argument('--molecule_db_path', required=True)
+    parser.add_argument('--n_samples', type=int, default=10)
+    parser.add_argument('--output_dir', default='generated_crystals')
+    
+    args = parser.parse_args()
+    
+    generate_crystals_with_all_conditions(
+        model_path=args.model_path,
+        molecule_db_path=args.molecule_db_path,
+        molecular_weight_range=(args.molecular_weight_min, args.molecular_weight_max),
+        pi_conjugation_ratio_range=(args.pi_conjugation_ratio_min, args.pi_conjugation_ratio_max),
+        target_properties={
+            'bandgap': args.target_bandgap,
+            'melting_point': args.target_melting_point
+        },
+        space_group=args.space_group,
+        density=args.density,
+        n_samples=args.n_samples,
+        output_dir=args.output_dir
+    )
+```
+
+**使用例**:
+
+```bash
+# すべての条件を指定して結晶を生成
+python generate_crystal_with_all_conditions.py \
+    --model_path outputs/crystal_with_properties/generative_model.npy \
+    --molecule_db_path data/molecules_with_props.db \
+    --molecular_weight_min 100 \
+    --molecular_weight_max 200 \
+    --pi_conjugation_ratio_min 0.3 \
+    --pi_conjugation_ratio_max 0.7 \
+    --target_bandgap 2.5 \
+    --target_melting_point 180.0 \
+    --space_group 14 \
+    --density 1.2 \
+    --n_samples 100 \
+    --output_dir samples/all_conditions_crystals
+```
+
+##### 期待される結果
+
+このアプローチにより、以下の条件をすべて満たす結晶が生成されます：
+
+- ✅ 分子条件: molecular_weight ∈ [100, 200], pi_conjugation_ratio ∈ [0.3, 0.7]
+- ✅ 物性値条件: bandgap ≈ 2.5 eV, melting_point ≈ 180°C
+- ✅ 結晶条件: space_group = 14 (P21/c), density ≈ 1.2 g/cm³
+- ✅ ホモ結晶: 単一分子で構成される結晶
+
+##### 実装のポイント
+
+**1. 物性値の選択**
+
+どの物性値を条件として使用するかは、あなたのアプリケーションに依存します：
+
+```python
+# 例1: 電子物性に焦点
+property_names = ['bandgap', 'ionization_potential', 'electron_affinity']
+
+# 例2: 熱物性に焦点
+property_names = ['melting_point', 'thermal_conductivity', 'heat_capacity']
+
+# 例3: 機械的性質に焦点
+property_names = ['bulk_modulus', 'shear_modulus', 'hardness']
+
+# 例4: 複合的
+property_names = [
+    'bandgap', 'melting_point', 'density',
+    'dielectric_constant', 'refractive_index'
+]
+```
+
+**2. データの品質**
+
+- 物性値の計算精度が生成品質に直接影響します
+- 第一原理計算（DFT等）による高精度な物性値を推奨
+- 実験値があればさらに良い
+
+**3. 正規化の重要性**
+
+物性値はスケールが異なるため、正規化が重要です：
+
+```python
+# 例: bandgap (0-5 eV), melting_point (50-300°C)
+# 正規化しないと melting_point が支配的になってしまう
+
+# 正規化により、すべての物性値が平等に扱われる
+normalized_properties = (properties - mean) / std
+```
+
+##### まとめ: 物性値データが利用可能な場合
+
+| 項目 | 内容 |
+|-----|------|
+| **実現可能性** | ✅ 完全に実現可能 |
+| **必要な実装** | PropertyConditioning モジュール + データローダー拡張 |
+| **データ要件** | 分子-結晶-物性値の三つ組データ |
+| **訓練方法** | 既存の訓練ループに物性値条件を追加 |
+| **生成方法** | 分子条件 + 物性値条件 + 結晶条件を同時に指定 |
+| **推奨度** | ⭐⭐⭐⭐⭐ 最も直接的で効果的な方法 |
+
+---
+
+#### 【参考】物性値データが利用できない場合の代替アプローチ
+
+以下は、物性値データが利用できない場合のアプローチです（元のQ4回答）：
 
 #### 現状の制約と問題点
 
@@ -1099,20 +1866,42 @@ python crystal_optimization.py
 
 ```
 質問: 物性値を条件として分子性結晶を生成できるか？
-回答: 現在のシステムでは直接的には不可能だが、以下の方法で実現可能
+回答: 【更新】物性値データが利用可能な場合は、直接的な実装が最も効果的
 
-推奨される実装順序:
-  1. 【短期】物性予測モデル + フィルタリング方式
-     ↓
-  2. 【中期】ベイズ最適化による効率化
-     ↓
-  3. 【長期】モデル拡張（物性値条件付けの追加）
+【ケース1】物性値データが利用可能な場合（あなたのケース）:
+  推奨アプローチ: PropertyConditioning モジュールによる直接的な条件付け
+  
+  実装順序:
+    1. データ準備: 分子-結晶-物性値の三つ組データセットを作成
+    2. PropertyConditioning モジュールの実装
+    3. ExtendedCombinedConditioning への統合
+    4. データローダーの拡張
+    5. 訓練スクリプトの更新
+    6. 生成スクリプトの実装
+  
+  利点:
+    ✅ エンドツーエンドで物性値を直接制御可能
+    ✅ 分子条件と物性値条件を同時に指定可能
+    ✅ 理論的に最もエレガントで効果的
+    ✅ 訓練後の生成が高速
+  
+  推奨度: ⭐⭐⭐⭐⭐
 
-最も実用的な方法: アプローチ1（物性予測+フィルタリング）
-  理由: 
-  - 実装が比較的容易
-  - 既存システムへの変更が最小限
-  - 段階的な改善が可能
+【ケース2】物性値データが利用できない場合:
+  推奨される実装順序:
+    1. 【短期】物性予測モデル + フィルタリング方式
+       ↓
+    2. 【中期】ベイズ最適化による効率化
+       ↓
+    3. 【長期】モデル拡張（物性値条件付けの追加）
+  
+  最も実用的な方法: アプローチ1（物性予測+フィルタリング）
+    理由: 
+    - 実装が比較的容易
+    - 既存システムへの変更が最小限
+    - 段階的な改善が可能
+  
+  推奨度: ⭐⭐⭐⭐
 ```
 
 ##### 技術的な課題
@@ -1125,6 +1914,43 @@ python crystal_optimization.py
 | **パラメータ空間が広い** | ドメイン知識による制約 + 階層的最適化 |
 
 ##### 次のステップ
+
+**【あなたのケース】物性値データが利用可能な場合**:
+
+```
+フェーズ1: データ準備（1週間）
+  1. 物性値CSVファイルの作成
+     - crystal_id, property_name, property_value の形式
+  2. prepare_property_dataset.py でデータベースを更新
+  3. データの検証と統計情報の確認
+
+フェーズ2: 実装（2-3週間）
+  1. PropertyConditioning モジュールの実装
+     - crystal/conditioning/property_conditioning.py
+  2. ExtendedCombinedConditioning の実装
+     - crystal/conditioning/__init__.py を更新
+  3. CrystalDatasetWithProperties の実装
+     - crystal/data/crystal_loader.py を更新
+  4. 訓練スクリプトの作成
+     - main_crystal_with_properties.py
+  5. 生成スクリプトの作成
+     - crystal/sampling_with_properties.py
+     - generate_crystal_with_all_conditions.py
+
+フェーズ3: 訓練と検証（1-2週間）
+  1. 小規模データセットでパイロット訓練
+  2. 生成結果の検証
+     - 物性値が目標に近いか確認
+     - 結晶構造の妥当性を確認
+  3. ハイパーパラメータの調整
+
+フェーズ4: 本格運用（継続）
+  1. 全データセットで訓練
+  2. 様々な条件で結晶生成をテスト
+  3. 結果の分析と改善
+```
+
+**【参考】物性値データが利用できない場合**:
 
 ```
 1. 物性予測モデルの構築
@@ -1144,6 +1970,103 @@ python crystal_optimization.py
    - モデル拡張の検討
    - エンドツーエンド学習の可能性を探る
 ```
+
+##### あなたの具体的な要求への回答
+
+あなたの要求：
+```
+・ある物性値を満たす分子性結晶を生成させたい
+・その分子性結晶は同じ分子から構成されるホモ結晶である
+・その分子性結晶の構成分子に対して、molecular_weight、pi_conjugation_ratio、
+  atom_types_encoding、functional_groups_encodingの条件を課したい
+・つまり、分子性結晶の構成分子のmolecular_weight、pi_conjugation_ratio、
+  atom_types_encoding、functional_groups_encodingと分子性結晶の物性値や
+  対称性等の構造因子を生成条件として与えると、その条件を満たす
+  分子性結晶の候補が生成されるようにしたい
+```
+
+**回答**: **完全に実現可能です。以下の手順で実装してください。**
+
+**ステップ1: データセットの準備**
+
+あなたが持っているデータ：
+- 単分子の構造
+- その分子から構成される分子性結晶（ホモ結晶）の構造
+- その分子性結晶の物性値
+
+これらを以下の形式で整理してください：
+
+```
+molecules.db:
+  - molecule_id
+  - 原子座標
+  - molecular_weight
+  - pi_conjugation_ratio
+  - atom_types
+  - functional_groups
+
+crystals.db:
+  - crystal_id
+  - molecule_id （どの分子から構成されるか）
+  - 原子座標
+  - 格子定数
+  - space_group
+  - density
+  
+crystal_properties.csv:
+  - crystal_id
+  - property_name （例: bandgap, melting_point）
+  - property_value
+```
+
+**ステップ2: PropertyConditioning の実装**
+
+上記の「【新規】物性値データが利用可能な場合の推奨アプローチ」セクションの
+コードをそのまま実装してください。
+
+**ステップ3: 訓練**
+
+```bash
+python main_crystal_with_properties.py \
+    --molecule_db_path data/molecules.db \
+    --crystal_db_path data/crystals.db \
+    --property_names bandgap melting_point \
+    --conditioning space_group density \
+    --n_epochs 500 \
+    --batch_size 32
+```
+
+**ステップ4: 生成**
+
+```bash
+# 例: 分子量100-200、π共役比率0.3-0.7、
+#     バンドギャップ2.5 eV、融点180°Cの結晶を生成
+python generate_crystal_with_all_conditions.py \
+    --model_path outputs/*/generative_model.npy \
+    --molecule_db_path data/molecules.db \
+    --molecular_weight_min 100 \
+    --molecular_weight_max 200 \
+    --pi_conjugation_ratio_min 0.3 \
+    --pi_conjugation_ratio_max 0.7 \
+    --target_bandgap 2.5 \
+    --target_melting_point 180.0 \
+    --space_group 14 \
+    --density 1.2 \
+    --n_samples 100
+```
+
+これにより、すべての条件を満たす分子性結晶が生成されます：
+- ✅ 分子条件: molecular_weight, pi_conjugation_ratio 等を満たす分子で構成
+- ✅ 物性値条件: 指定した物性値（bandgap, melting_point等）を満たす
+- ✅ 結晶条件: 指定した空間群、密度を満たす
+- ✅ ホモ結晶: 単一分子で構成される結晶
+
+**重要なポイント**:
+
+1. **物性値データが鍵**: あなたが持っている物性値データが、この手法の最大の強みです
+2. **エンドツーエンド学習**: モデルが物性値と結晶構造の関係を直接学習します
+3. **柔軟な条件指定**: 分子条件、物性値条件、結晶条件を自由に組み合わせられます
+4. **高速生成**: 一度訓練すれば、様々な条件で高速に結晶を生成できます
 
 ---
 
@@ -1414,9 +2337,15 @@ db.write(
 ---
 
 **文書作成日**: 2025-01-XX  
-**最終更新日**: 2025-10-23  
-**バージョン**: 1.1  
-**ステータス**: 更新（Q4追加: 物性値条件付け生成に関する議論）  
+**最終更新日**: 2025-10-24  
+**バージョン**: 1.2  
+**ステータス**: 更新（Q4拡張: 物性値データが利用可能な場合の直接的な実装方法を追加）  
 **更新履歴**:
 - v1.0 (2025-01-XX): 初版作成（Q1-Q3）
 - v1.1 (2025-10-23): Q4追加（物性値を条件とした結晶生成の実現方法）
+- v1.2 (2025-10-24): Q4拡張（物性値データが利用可能な場合の具体的な実装方法を追加）
+  - PropertyConditioning モジュールの詳細設計
+  - ExtendedCombinedConditioning の実装
+  - データ準備からモデル訓練、生成までの完全なワークフロー
+  - 分子条件と物性値条件を統合した生成方法
+  - ユーザーの具体的な要求に対する明確な回答
