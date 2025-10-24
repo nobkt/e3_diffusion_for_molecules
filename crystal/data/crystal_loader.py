@@ -308,4 +308,193 @@ def collate_crystal_batch(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, tor
         density = torch.stack([item['density'] for item in batch])
         batched_data['density'] = density
     
+    # Add properties if present
+    if 'properties' in batch[0]:
+        properties = torch.stack([item['properties'] for item in batch])
+        batched_data['properties'] = properties
+    
     return batched_data
+
+
+class CrystalDatasetWithProperties(CrystalDataset):
+    """
+    Extended crystal dataset that includes physical property values.
+    
+    This class extends CrystalDataset to load and provide physical properties
+    (e.g., bandgap, melting point) along with crystal structures.
+    
+    Properties are extracted from the ASE database 'data' field and statistics
+    (mean, std) are computed for normalization during training.
+    
+    Args:
+        db_path: Path to crystals ASE database
+        indices: List of database indices to use
+        property_names: List of property names to extract
+        molecule_dataset: MoleculeDataset instance (optional)
+        molecule_crystal_mapper: MoleculeCrystalMapper instance (optional)
+        **kwargs: Additional arguments passed to CrystalDataset
+    
+    Example:
+        >>> dataset = CrystalDatasetWithProperties(
+        ...     db_path='crystals.db',
+        ...     indices=list(range(1000)),
+        ...     property_names=['bandgap', 'melting_point']
+        ... )
+        >>> data = dataset[0]
+        >>> print(data['properties'])  # [bandgap, melting_point]
+        >>> print(dataset.property_mean)  # Mean of each property
+        >>> print(dataset.property_std)  # Std of each property
+    """
+    
+    def __init__(
+        self,
+        db_path: str,
+        indices: List[int],
+        property_names: Optional[List[str]] = None,
+        molecule_dataset: Optional['MoleculeDataset'] = None,
+        molecule_crystal_mapper: Optional['MoleculeCrystalMapper'] = None,
+        **kwargs
+    ):
+        # Initialize parent class
+        super().__init__(
+            db_path=db_path,
+            indices=indices,
+            molecule_dataset=molecule_dataset,
+            molecule_crystal_mapper=molecule_crystal_mapper,
+            **kwargs
+        )
+        
+        self.property_names = property_names or []
+        
+        # Compute property statistics if properties are requested
+        if self.property_names:
+            self._compute_property_statistics()
+        else:
+            self.property_mean = None
+            self.property_std = None
+    
+    def _compute_property_statistics(self):
+        """
+        Compute mean and standard deviation of property values.
+        
+        Statistics are computed across all samples in the dataset and
+        used for property normalization during training.
+        
+        Raises:
+            ValueError: If a property is missing in the database
+            ValueError: If all values of a property are the same (std=0)
+        """
+        property_values = []
+        missing_properties = set()
+        
+        # Collect all property values
+        for idx in self.indices:
+            row = self.db.get(idx + 1)  # Convert to 1-based for ASE DB
+            values = []
+            
+            for prop_name in self.property_names:
+                # Try different locations for property values
+                value = None
+                
+                # Check in data field (most common)
+                if hasattr(row, 'data') and prop_name in row.data:
+                    value = row.data[prop_name]
+                # Check as direct attribute
+                elif hasattr(row, prop_name):
+                    value = getattr(row, prop_name)
+                # Check in key_value_pairs
+                elif hasattr(row, 'key_value_pairs') and prop_name in row.key_value_pairs:
+                    value = row.key_value_pairs[prop_name]
+                
+                if value is None:
+                    missing_properties.add(prop_name)
+                    # Use NaN for missing values (will be caught later)
+                    values.append(float('nan'))
+                else:
+                    values.append(float(value))
+            
+            property_values.append(values)
+        
+        # Raise error if any properties are missing
+        if missing_properties:
+            raise ValueError(
+                f"The following properties are missing in some database entries: "
+                f"{missing_properties}. All properties must be present for all crystals."
+            )
+        
+        # Convert to tensor
+        property_values = torch.tensor(property_values, dtype=torch.float32)
+        
+        # Check for NaN values
+        if torch.any(torch.isnan(property_values)):
+            raise ValueError(
+                "NaN values found in property values. "
+                "Ensure all properties are present and have valid numeric values."
+            )
+        
+        # Compute statistics
+        self.property_mean = property_values.mean(dim=0)
+        self.property_std = property_values.std(dim=0)
+        
+        # Check for zero std (all values the same)
+        zero_std_mask = self.property_std < 1e-8
+        if torch.any(zero_std_mask):
+            zero_std_props = [
+                self.property_names[i] 
+                for i in range(len(self.property_names)) 
+                if zero_std_mask[i]
+            ]
+            raise ValueError(
+                f"The following properties have zero standard deviation "
+                f"(all values are the same): {zero_std_props}. "
+                f"Remove these properties or add more diverse data."
+            )
+        
+        # Log statistics
+        print(f"\nProperty statistics for {len(self.indices)} crystals:")
+        for i, name in enumerate(self.property_names):
+            print(
+                f"  {name:30s}: "
+                f"mean={self.property_mean[i]:8.3f}, "
+                f"std={self.property_std[i]:8.3f}"
+            )
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """
+        Get single crystal structure with properties.
+        
+        Returns:
+            data: Dictionary containing all CrystalDataset fields plus:
+                - properties: [property_dim] property values
+        """
+        # Get base data from parent class
+        data = super().__getitem__(idx)
+        
+        # Add property values if requested
+        if self.property_names:
+            db_idx = self.indices[idx]
+            row = self.db.get(db_idx + 1)  # Convert to 1-based for ASE DB
+            
+            properties = []
+            for prop_name in self.property_names:
+                # Try different locations (same as in _compute_property_statistics)
+                value = None
+                
+                if hasattr(row, 'data') and prop_name in row.data:
+                    value = row.data[prop_name]
+                elif hasattr(row, prop_name):
+                    value = getattr(row, prop_name)
+                elif hasattr(row, 'key_value_pairs') and prop_name in row.key_value_pairs:
+                    value = row.key_value_pairs[prop_name]
+                
+                if value is None:
+                    # This should not happen if _compute_property_statistics succeeded
+                    raise ValueError(
+                        f"Property '{prop_name}' not found for crystal {data['crystal_id']}"
+                    )
+                
+                properties.append(float(value))
+            
+            data['properties'] = torch.tensor(properties, dtype=torch.float32)
+        
+        return data
