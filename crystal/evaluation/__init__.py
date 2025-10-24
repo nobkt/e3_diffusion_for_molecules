@@ -5,14 +5,17 @@ Modules:
 - crystal_metrics: Evaluation metrics for crystal structures
 - structure_validator: Structure validation utilities
 - symmetry_analyzer: Symmetry analysis tools
+- property_predictor: Property prediction for validation (Phase 4)
 """
 
 from crystal.evaluation.crystal_metrics import CrystalMetrics
 from crystal.evaluation.structure_validator import StructureValidator
 from crystal.evaluation.symmetry_analyzer import SymmetryAnalyzer
+from crystal.evaluation.property_predictor import PropertyPredictor
 
 __all__ = [
     'CrystalMetrics',
     'StructureValidator',
     'SymmetryAnalyzer',
+    'PropertyPredictor',
 ]
