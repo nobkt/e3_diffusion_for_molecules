@@ -8,6 +8,7 @@ Modules:
 - property_predictor: Property prediction for validation (Phase 4.1)
 - multi_property_optimizer: Multi-property optimization and Pareto search (Phase 4.2)
 - advanced_visualization: Advanced visualization tools (Phase 4.3)
+- performance_optimization: Performance optimization tools (Phase 4.4)
 """
 
 from crystal.evaluation.crystal_metrics import CrystalMetrics
@@ -24,6 +25,11 @@ from crystal.evaluation.advanced_visualization import (
     StructureQualityAnalyzer,
     HTMLReportGenerator,
 )
+from crystal.evaluation.performance_optimization import (
+    ConditioningCache,
+    MultiGPUGenerator,
+    BatchProcessor,
+)
 
 __all__ = [
     'CrystalMetrics',
@@ -36,4 +42,7 @@ __all__ = [
     'PropertyDistributionAnalyzer',
     'StructureQualityAnalyzer',
     'HTMLReportGenerator',
+    'ConditioningCache',
+    'MultiGPUGenerator',
+    'BatchProcessor',
 ]
