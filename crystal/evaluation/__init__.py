@@ -7,6 +7,7 @@ Modules:
 - symmetry_analyzer: Symmetry analysis tools
 - property_predictor: Property prediction for validation (Phase 4.1)
 - multi_property_optimizer: Multi-property optimization and Pareto search (Phase 4.2)
+- advanced_visualization: Advanced visualization tools (Phase 4.3)
 """
 
 from crystal.evaluation.crystal_metrics import CrystalMetrics
@@ -18,6 +19,11 @@ from crystal.evaluation.multi_property_optimizer import (
     ConstrainedCrystalGenerator,
     ParetoFrontierSearcher,
 )
+from crystal.evaluation.advanced_visualization import (
+    PropertyDistributionAnalyzer,
+    StructureQualityAnalyzer,
+    HTMLReportGenerator,
+)
 
 __all__ = [
     'CrystalMetrics',
@@ -27,4 +33,7 @@ __all__ = [
     'PropertyConstraint',
     'ConstrainedCrystalGenerator',
     'ParetoFrontierSearcher',
+    'PropertyDistributionAnalyzer',
+    'StructureQualityAnalyzer',
+    'HTMLReportGenerator',
 ]
