@@ -101,7 +101,7 @@ from crystal.evaluation import (
 )
 
 
-def parse_constraint(constraint_str: str) -> Tuple[str, str, float or Tuple[float, float]]:
+def parse_constraint(constraint_str: str) -> Tuple[str, str, Union[float, Tuple[float, float]]]:
     """
     Parse constraint string.
     
@@ -157,8 +157,9 @@ def run_constraint_mode(args):
     predictor = PropertyPredictor.load(args.predictor_path)
     
     print(f"Loading generator from {args.generator_path}")
-    # generator = load_generator(args.generator_path)
     # NOTE: Generator loading depends on specific implementation
+    # Example pseudocode:
+    # generator = load_generator(args.generator_path)
     
     # Parse constraints
     constraints = []
@@ -173,6 +174,8 @@ def run_constraint_mode(args):
     
     # Generate crystals
     print(f"\nGenerating {args.n_samples} crystals...")
+    # NOTE: Crystal generation depends on integration with generation pipeline
+    # Example pseudocode:
     # satisfied_crystals = constrained_gen.generate_until_satisfied(
     #     molecule_id=args.molecule_id,
     #     n_samples=args.n_samples,
@@ -183,8 +186,10 @@ def run_constraint_mode(args):
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Save crystals as CIF files
-    # Save summary JSON
+    # NOTE: Saving depends on crystal format
+    # Example pseudocode:
+    # - Save crystals as CIF files
+    # - Save summary JSON
     
     print(f"\nResults saved to {output_dir}")
 
@@ -209,12 +214,18 @@ def run_pareto_mode(args):
     
     # Generate candidates
     print(f"\nGenerating {args.n_candidates} candidate crystals...")
+    # NOTE: Candidate generation depends on integration with generation pipeline
+    # Example pseudocode:
     # candidates = generate_candidates(...)
     
     # Find Pareto frontier
+    # NOTE: Requires predictions for all candidates
+    # Example pseudocode:
     # pareto_indices = searcher.find_pareto_frontier(predictions_list)
     
     # Visualize
+    # NOTE: Visualization depends on Pareto results
+    # Example pseudocode:
     # searcher.visualize_pareto_frontier(...)
     
     # Save results
@@ -460,12 +471,14 @@ def load_generated_crystals(generated_dir: Path, predictor: PropertyPredictor):
     print(f"Loading {len(cif_files)} crystal files...")
     
     for cif_file in cif_files:
-        # Load crystal from CIF
+        # NOTE: Crystal loading depends on CIF parsing implementation
+        # Example pseudocode:
         # crystal = load_cif(cif_file)
         # crystals.append(crystal)
         
         # Predict properties
-        # predictions = predictor(...)
+        # Example pseudocode:
+        # predictions = predictor(crystal['positions'], crystal['cell'], crystal['atomic_numbers'])
         # for name in predictor.property_names:
         #     properties[name].append(predictions[name].item())
         pass
