@@ -46,10 +46,10 @@ When specifying `--property_values 'atom_types_encoding=[C,H,O,N]'` during gener
 However, since `atom_types_encoding` was expanded into individual `has_<atom>` features during training, the `property_norms` dictionary doesn't contain an `atom_types_encoding` key. Instead, it contains keys like `has_C`, `has_H`, `has_N`, `has_O`, etc.
 
 As a result:
-1. `atom_types_encoding` was not found in `property_norms`
-2. No atom type information was set in the context tensor (remained at default zeros)
-3. The model generated molecules without atom type constraints
-4. Molecules were generated with any atom types present in the training data (Br, I, Si, etc.)
+- `atom_types_encoding` was not found in `property_norms`
+- No atom type information was set in the context tensor (remained at default zeros)
+- The model generated molecules without atom type constraints
+- Molecules were generated with any atom types present in the training data (Br, I, Si, etc.)
 
 ## Fix Implementation
 

@@ -18,7 +18,11 @@ def test_exact_context_creation():
     # Mock arguments for testing
     class MockArgs:
         def __init__(self):
-            self.context_node_nf = 10  # Expect 10 context features
+            # Expect 10 context features total:
+            # - 2 scalar features: molecular_weight, pi_conjugation_ratio
+            # - 4 atom type features: has_C, has_H, has_N, has_O
+            # - 4 additional padding features to test proper handling
+            self.context_node_nf = 10  
             self.conditioning = ['molecular_weight', 'pi_conjugation_ratio', 'atom_types_encoding']
             self.dataset = 'ase_db'
             self.remove_h = False

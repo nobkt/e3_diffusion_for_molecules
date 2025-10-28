@@ -46,10 +46,10 @@ if atom_types_sorted:
 しかし、学習時に`atom_types_encoding`は個別の`has_<原子>`特徴量に展開されているため、`property_norms`には`atom_types_encoding`というキーは存在せず、代わりに`has_C`、`has_H`、`has_N`、`has_O`などのキーが存在します。
 
 その結果：
-1. `atom_types_encoding`が`property_norms`に見つからない
-2. コンテキストテンソルに原子種情報が設定されない（デフォルトのゼロのまま）
-3. モデルが原子種の制約なしで分子を生成する
-4. 学習データに含まれる任意の原子種（Br、I、Siなど）で分子が生成される
+- `atom_types_encoding`が`property_norms`に見つからない
+- コンテキストテンソルに原子種情報が設定されない（デフォルトのゼロのまま）
+- モデルが原子種の制約なしで分子を生成する
+- 学習データに含まれる任意の原子種（Br、I、Siなど）で分子が生成される
 
 ## 修正内容
 
