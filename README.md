@@ -100,4 +100,57 @@ To use a pre-trained generator and classifier model for alpha you can use the fo
 
 ```python eval_conditional_qm9.py --generators_path outputs/exp_cond_molecular_descriptors --classifiers_path qm9/property_prediction/outputs/exp_class_molecular_weight --property molecular_weight --iterations 100 --batch_size 100 --task edm```
 
+### Exact Conditional Generation (NEW)
+
+You can now generate molecules with **exact specified conditions** instead of sweeping through property ranges. This is useful when you want molecules with specific characteristics.
+
+#### Quick Example
+
+After training with molecular descriptors:
+
+```bash
+python eval_conditional_qm9.py \
+    --generators_path outputs/molecular_descriptor_model \
+    --task qualitative \
+    --use_exact_conditions \
+    --property_values 'molecular_weight=100,pi_conjugation_ratio=0.8,atom_types_encoding=[C,H,O,N],functional_groups_encoding=[OH,COOH]' \
+    --n_sweeps 5
+```
+
+#### Comprehensive Guides
+
+For detailed information about exact conditional generation:
+
+- **[QUICK_GENERATION_REFERENCE_JA.md](QUICK_GENERATION_REFERENCE_JA.md)** - Quick reference with ready-to-use commands (Japanese)
+- **[GENERATION_COMMAND_GUIDE_JA.md](GENERATION_COMMAND_GUIDE_JA.md)** - Comprehensive generation guide (Japanese)
+- **[EXACT_CONDITIONAL_GENERATION.md](EXACT_CONDITIONAL_GENERATION.md)** - Technical documentation (English)
+
+#### Automated Generation Scripts
+
+Generate molecules with multiple condition combinations automatically:
+
+```bash
+# Using shell script
+bash generate_all_conditions.sh outputs/molecular_descriptor_model
+
+# Using Python script with custom conditions
+python generate_molecules_with_conditions.py \
+    --model_path outputs/molecular_descriptor_model \
+    --molecular_weights 100 200 \
+    --pi_conjugations 0.8 0.9 1.0 \
+    --atom_types C H O N \
+    --functional_groups OH COOH \
+    --n_sweeps 5
+
+# Display all commands without executing
+bash show_generation_commands.sh
+```
+
+#### Supported Conditions
+
+- `molecular_weight` - Molecular weight in atomic mass units
+- `pi_conjugation_ratio` - Ratio of π bonds (0.0-1.0)
+- `atom_types_encoding` - List of atom types, e.g., `[C,H,O,N]`
+- `functional_groups_encoding` - List of functional groups, e.g., `[OH,COOH,NH2]`
+
 
