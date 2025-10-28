@@ -111,7 +111,7 @@ def parse_single_property_value(value_str):
     return value_str
 
 
-def create_exact_context(property_values, args_gen, property_norms, n_frames, n_nodes, device):
+def create_exact_context(property_values, args_gen, property_norms, n_frames, n_nodes, device, dataloaders):
     """
     Create context tensor with exact property values that matches the model's expected dimensions.
     
@@ -122,6 +122,7 @@ def create_exact_context(property_values, args_gen, property_norms, n_frames, n_
         n_frames: Number of frames to generate
         n_nodes: Number of nodes per molecule
         device: Device to create tensors on
+        dataloaders: Dataloaders to retrieve atom types/functional groups mappings
         
     Returns:
         torch.Tensor: Context tensor with exact conditions repeated for all frames
@@ -138,6 +139,42 @@ def create_exact_context(property_values, args_gen, property_norms, n_frames, n_
     # Initialize with zeros (normalized mean for most properties)
     context = torch.zeros(n_frames, expected_context_features, dtype=torch.float32, device=device)
     
+    # Get atom types and functional groups mappings from the training data
+    # These determine which individual has_<atom> and has_<group> features exist
+    atom_types_mapping = []
+    functional_groups_mapping = []
+    if dataloaders is not None and 'train' in dataloaders:
+        dataset = dataloaders['train'].dataset
+        if hasattr(dataset, 'data'):
+            atom_types_mapping = dataset.data.get('_atom_types_mapping', [])
+            functional_groups_mapping = dataset.data.get('_functional_groups_mapping', [])
+    
+    # Expand atom_types_encoding and functional_groups_encoding to individual features
+    # This must match what was done during training
+    expanded_property_values = {}
+    for key, value in property_values.items():
+        if key == 'atom_types_encoding' and isinstance(value, list):
+            # Expand to individual has_<atom> features
+            # Set has_<atom>=1 for atoms in the list, has_<atom>=0 for others
+            for atom in atom_types_mapping:
+                feature_name = f'has_{atom}'
+                if atom in value:
+                    expanded_property_values[feature_name] = 1.0
+                else:
+                    expanded_property_values[feature_name] = 0.0
+        elif key == 'functional_groups_encoding' and isinstance(value, list):
+            # Expand to individual has_<group> features
+            # Set has_<group>=1 for groups in the list, has_<group>=0 for others
+            for group in functional_groups_mapping:
+                feature_name = f'has_{group}'
+                if group in value:
+                    expanded_property_values[feature_name] = 1.0
+                else:
+                    expanded_property_values[feature_name] = 0.0
+        else:
+            # Keep scalar properties as-is
+            expanded_property_values[key] = value
+    
     # Fill in the context features based on available exact values
     # We need to match the order and dimensions used during training
     feature_idx = 0
@@ -145,9 +182,58 @@ def create_exact_context(property_values, args_gen, property_norms, n_frames, n_
     for key in args_gen.conditioning:
         if feature_idx >= expected_context_features:
             break
-            
-        if key in property_values and key in property_norms:
-            exact_value = property_values[key]
+        
+        # Handle special case: atom_types_encoding and functional_groups_encoding
+        # These are expanded to individual has_<atom> and has_<group> features during training
+        if key == 'atom_types_encoding':
+            # Process individual has_<atom> features
+            for atom in atom_types_mapping:
+                if feature_idx >= expected_context_features:
+                    break
+                feature_name = f'has_{atom}'
+                if feature_name in expanded_property_values and feature_name in property_norms:
+                    value = expanded_property_values[feature_name]
+                    mean = property_norms[feature_name]['mean']
+                    mad = property_norms[feature_name]['mad']
+                    
+                    # Handle tensor means/mads
+                    if hasattr(mean, 'item'):
+                        mean = mean.item()
+                    if hasattr(mad, 'item'):
+                        mad = mad.item()
+                    
+                    normalized_value = (value - mean) / mad
+                    context[:, feature_idx] = normalized_value
+                    feature_idx += 1
+                elif feature_name in property_norms:
+                    # Use default (normalized mean = 0)
+                    feature_idx += 1
+        elif key == 'functional_groups_encoding':
+            # Process individual has_<group> features
+            for group in functional_groups_mapping:
+                if feature_idx >= expected_context_features:
+                    break
+                feature_name = f'has_{group}'
+                if feature_name in expanded_property_values and feature_name in property_norms:
+                    value = expanded_property_values[feature_name]
+                    mean = property_norms[feature_name]['mean']
+                    mad = property_norms[feature_name]['mad']
+                    
+                    # Handle tensor means/mads
+                    if hasattr(mean, 'item'):
+                        mean = mean.item()
+                    if hasattr(mad, 'item'):
+                        mad = mad.item()
+                    
+                    normalized_value = (value - mean) / mad
+                    context[:, feature_idx] = normalized_value
+                    feature_idx += 1
+                elif feature_name in property_norms:
+                    # Use default (normalized mean = 0)
+                    feature_idx += 1
+        elif key in expanded_property_values and key in property_norms:
+            # Scalar property
+            exact_value = expanded_property_values[key]
             
             if isinstance(exact_value, (int, float)):
                 # Scalar property - normalize and set
@@ -163,50 +249,8 @@ def create_exact_context(property_values, args_gen, property_norms, n_frames, n_
                 normalized_value = (exact_value - mean) / mad
                 context[:, feature_idx] = normalized_value
                 feature_idx += 1
-                
-            elif isinstance(exact_value, list) and key == 'atom_types_encoding':
-                # For atom types, we might use a simpler encoding that fits the expected dimensions
-                # If we have multiple atom types, we might encode them as a single feature
-                # or use only the first few features
-                from configs.datasets_config import get_dataset_info
-                dataset_info = get_dataset_info(args_gen.dataset, args_gen.remove_h)
-                atom_encoder = dataset_info.get('atom_encoder', {})
-                
-                # Determine how many features this property should use
-                mean = property_norms[key]['mean']
-                if hasattr(mean, 'numel'):
-                    n_features = mean.numel()
-                elif hasattr(mean, 'shape'):
-                    n_features = mean.shape[0] if len(mean.shape) == 1 else 1
-                else:
-                    n_features = 1
-                
-                # Don't exceed the expected context size
-                n_features = min(n_features, expected_context_features - feature_idx)
-                
-                if n_features > 0:
-                    # Create encoding that fits the expected dimensions
-                    encoding = torch.zeros(n_features, dtype=torch.float32)
-                    
-                    # Simple encoding: set first len(exact_value) features to 1
-                    for i, atom_symbol in enumerate(exact_value[:n_features]):
-                        if atom_symbol in atom_encoder:
-                            encoding[i] = 1.0
-                    
-                    # Apply normalization if available
-                    mean_tensor = property_norms[key]['mean']
-                    mad_tensor = property_norms[key]['mad']
-                    
-                    if hasattr(mean_tensor, 'shape') and len(mean_tensor.shape) > 0:
-                        mean_vals = mean_tensor[:n_features] if len(mean_tensor) >= n_features else mean_tensor
-                        mad_vals = mad_tensor[:n_features] if len(mad_tensor) >= n_features else mad_tensor
-                        encoding = (encoding - mean_vals) / mad_vals
-                    
-                    context[:, feature_idx:feature_idx + n_features] = encoding.unsqueeze(0).repeat(n_frames, 1)
-                    feature_idx += n_features
-                    
             else:
-                # For other properties, use default normalized values (usually zero)
+                # For other types, use default normalized values (usually zero)
                 mean = property_norms[key]['mean']
                 if hasattr(mean, 'numel'):
                     n_features = min(mean.numel(), expected_context_features - feature_idx)
@@ -235,6 +279,7 @@ def create_exact_context(property_values, args_gen, property_norms, n_frames, n_
             feature_idx += n_features
     
     print(f"Created context with shape {context.shape}, expected {expected_context_features} features per frame")
+    print(f"Expanded property values: {expanded_property_values}")
     return context
 
 
@@ -440,10 +485,10 @@ def main_qualitative(args):
         print(f"Using exact conditions: {property_values}")
         
         # Create exact context tensor
-        n_frames = 100  # Default number of molecules to generate
+        n_frames = args.n_samples  # Number of molecules to generate
         n_nodes = 19    # Default number of nodes (can be made configurable)
         exact_context = create_exact_context(property_values, args_gen, property_norms, 
-                                            n_frames, n_nodes, args.device)
+                                            n_frames, n_nodes, args.device, dataloaders)
         
         print(f"Created exact context tensor with shape: {exact_context.shape if exact_context is not None else None}")
 
@@ -482,6 +527,8 @@ if __name__ == "__main__":
                         help='naive, edm, qm9_second_half, qualitative')
     parser.add_argument('--n_sweeps', type=int, default=10,
                         help='number of sweeps for the qualitative conditional experiment')
+    parser.add_argument('--n_samples', type=int, default=100,
+                        help='number of samples/molecules to generate per sweep')
 
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()

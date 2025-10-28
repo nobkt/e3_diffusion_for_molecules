@@ -18,17 +18,37 @@ def test_exact_context_creation():
     # Mock arguments for testing
     class MockArgs:
         def __init__(self):
+            # Expect 10 context features total:
+            # - 2 scalar features: molecular_weight, pi_conjugation_ratio
+            # - 4 atom type features: has_C, has_H, has_N, has_O
+            # - 4 additional padding features to test proper handling
+            self.context_node_nf = 10  
             self.conditioning = ['molecular_weight', 'pi_conjugation_ratio', 'atom_types_encoding']
             self.dataset = 'ase_db'
             self.remove_h = False
     
-    args_gen = MockArgs()
+    class MockDataset:
+        def __init__(self):
+            self.data = {
+                '_atom_types_mapping': ['C', 'H', 'N', 'O'],
+                '_functional_groups_mapping': []
+            }
     
-    # Mock property norms
+    class MockDataloader:
+        def __init__(self):
+            self.dataset = MockDataset()
+    
+    args_gen = MockArgs()
+    dataloaders = {'train': MockDataloader()}
+    
+    # Mock property norms - use individual has_<atom> features
     property_norms = {
-        'molecular_weight': {'mean': 50.0, 'mad': 10.0},
-        'pi_conjugation_ratio': {'mean': 0.5, 'mad': 0.2},
-        'atom_types_encoding': {'mean': torch.zeros(4), 'mad': torch.ones(4)}
+        'molecular_weight': {'mean': torch.tensor(50.0), 'mad': torch.tensor(10.0)},
+        'pi_conjugation_ratio': {'mean': torch.tensor(0.5), 'mad': torch.tensor(0.2)},
+        'has_C': {'mean': torch.tensor(0.8), 'mad': torch.tensor(0.3)},
+        'has_H': {'mean': torch.tensor(0.9), 'mad': torch.tensor(0.2)},
+        'has_N': {'mean': torch.tensor(0.4), 'mad': torch.tensor(0.3)},
+        'has_O': {'mean': torch.tensor(0.5), 'mad': torch.tensor(0.3)},
     }
     
     # Test exact property values
@@ -46,7 +66,7 @@ def test_exact_context_creation():
     try:
         context = create_exact_context(
             property_values, args_gen, property_norms, 
-            n_frames, n_nodes, device
+            n_frames, n_nodes, device, dataloaders
         )
         
         print(f"✓ Successfully created context tensor")
@@ -63,6 +83,10 @@ def test_exact_context_creation():
         pi_col = context[:, 1]  # Second column should be pi conjugation ratio
         expected_pi = (0.9 - 0.5) / 0.2  # Should be 2.0
         print(f"  π conjugation ratio column: {pi_col[0].item():.3f} (expected: {expected_pi:.3f})")
+        
+        # Check that atom type features are set
+        non_zero_count = (context[0] != 0).sum().item()
+        print(f"  Number of non-zero features: {non_zero_count}")
         
         print("✓ Context creation test passed!")
         
